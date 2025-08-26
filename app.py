@@ -759,11 +759,14 @@ if mode == "Файл (CSV/XLSX/JSON)":
                                    low_score_threshold=low_score_threshold)
             st.markdown("### Подозрительные / аномальные случаи")
 
-# Общая сводка
-total_rows = len(df)
-total_anom = sum(len(sdf) for sdf in susp.values())
-st.info(f"Найдено **{total_anom}** подозрительных случаев из {total_rows} "
-        f"({(total_anom/total_rows*100 if total_rows else 0):.1f}%)")
+if "df" in locals() or "df" in globals():
+    total_rows = len(df)
+    total_anom = sum(len(sdf) for sdf in susp.values())
+    st.info(f"Найдено **{total_anom}** подозрительных случаев из {total_rows} "
+            f"({(total_anom/total_rows*100 if total_rows else 0):.1f}%)")
+else:
+    total_rows = None
+    st.info("Загрузите файл, чтобы посмотреть аномалии.")
 
 # Описи категорий
 descriptions = {
@@ -775,7 +778,6 @@ descriptions = {
     "used_threshold": "Использованный порог для классификации"
 }
 
-# Обход категорий
 for k, sdf in susp.items():
     st.markdown(f"**{k}** — {len(sdf)} случаев")
     if k in descriptions:
@@ -787,11 +789,11 @@ for k, sdf in susp.items():
             sdf = sdf.sort_values("score", ascending=(k in ["low_sem","fn_like"]))
         st.dataframe(sdf, use_container_width=True, height=300)
 
-        # скачивание
+        # скачать
         s_csv = sdf.to_csv(index=False).encode("utf-8")
         st.download_button(
-            f"⬇️ Скачать {k}.csv", 
-            data=s_csv, 
-            file_name=f"{k}.csv", 
+            f"⬇️ Скачать {k}.csv",
+            data=s_csv,
+            file_name=f"{k}.csv",
             mime="text/csv"
         )
