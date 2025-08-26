@@ -117,7 +117,7 @@ def add_suggestions(phrases: List[str]):
     #else:
         #st.sidebar.warning("История пустая")
 
-# ======== Режим: выбор ввода (упрощённый, с очисткой ручного ввода) ========
+# ======== Режим: выбор ввода (без потери данных) ========
 if "mode" not in st.session_state:
     st.session_state.mode = "Файл (CSV/XLSX/JSON)"
 
@@ -128,17 +128,31 @@ mode_choice = st.radio(
     horizontal=True
 )
 
-# Переключение режима
+# Смена режима
 if mode_choice != st.session_state.mode:
-    # Если уход с ручного ввода → очищаем поля
+    # Очищаем ручной ввод при уходе с него
     if st.session_state.mode == "Ручной ввод":
         for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
             if k in st.session_state:
                 st.session_state.pop(k)
+    # Не трогаем загруженный файл (он останется в session_state)
     st.session_state.mode = mode_choice
-    st.rerun()  # перестраиваем интерфейс
+    st.rerun()
 
 mode = st.session_state.mode
+
+# ======== Загрузка файла с кэшированием ========
+uploaded_file = st.file_uploader("Выберите файл", type=["csv", "xlsx", "xls", "json", "ndjson"])
+
+# Сохраняем загруженный файл в session_state, чтобы не терялся при rerun
+if uploaded_file is not None:
+    st.session_state["uploaded_file"] = uploaded_file
+elif "uploaded_file" in st.session_state:
+    uploaded_file = st.session_state["uploaded_file"]
+
+# ======== Подсказка, если файл есть, но активен другой режим ========
+if uploaded_file is not None and mode != "Файл (CSV/XLSX/JSON)":
+    st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
 
 # ======== Общие хелперы для вычислений ========
 def compute_pair_scores(model, pairs: List[Tuple[str, str]], metric: str, batch_size: int):
