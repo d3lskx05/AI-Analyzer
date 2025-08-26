@@ -1,151 +1,179 @@
-# utils.py — утилиты для исследовательской аналитики эмбеддингов
+# app.py — исследовательская утилита для анализа эмбеддингов
 
+import streamlit as st
 import pandas as pd
 import numpy as np
-import hashlib
-import json
-import io
-import zipfile
-import tarfile
-import shutil
-import tempfile
-import os
-from typing import List, Tuple, Dict, Any
+import altair as alt
+from sentence_transformers import util
 
-from sentence_transformers import SentenceTransformer, util
-from sklearn.cluster import KMeans
-import umap
-import re
+from utils import (
+    preprocess_text,
+    read_uploaded_file_bytes,
+    jaccard_tokens,
+    style_suspicious_and_low,
+    load_model,
+    encode_texts_in_batches,
+    precision_at_k,
+    mean_reciprocal_rank,
+    ndcg_at_k,
+    cluster_embeddings,
+)
 
+# ================= Streamlit config =================
+st.set_page_config(page_title="Embedding Analyzer", layout="wide")
+st.title("🔬 Embedding Research Utility")
 
-# ============== Препроцессинг ==============
+# ================= Sidebar =================
+st.sidebar.header("Модель")
+model_id = st.sidebar.text_input("HF Model ID", value="sentence-transformers/all-MiniLM-L6-v2")
+batch_size = st.sidebar.number_input("Batch size", 8, 1024, 64, 8)
 
-def preprocess_text(t: Any) -> str:
-    """Простой препроцессинг: lower + trim + нормализация пробелов"""
-    if pd.isna(t):
-        return ""
-    return " ".join(str(t).lower().strip().split())
+st.sidebar.header("Пороги")
+semantic_threshold = st.sidebar.slider("Semantic (>=)", 0.0, 1.0, 0.8, 0.01)
+lexical_threshold = st.sidebar.slider("Lexical (<=)", 0.0, 1.0, 0.3, 0.01)
+low_score_threshold = st.sidebar.slider("Low score (<)", 0.0, 1.0, 0.75, 0.01)
 
+# ================= Load model =================
+try:
+    with st.spinner("Загружаю модель..."):
+        model = load_model(model_id)
+    st.sidebar.success("Модель загружена")
+except Exception as e:
+    st.sidebar.error(f"Ошибка загрузки: {e}")
+    st.stop()
 
-def file_md5(b: bytes) -> str:
-    return hashlib.md5(b).hexdigest()
+# ================= Upload =================
+st.header("1. Данные")
+uploaded_file = st.file_uploader("Файл (CSV/XLSX/JSON)", type=["csv", "xlsx", "xls", "json", "ndjson"])
+if uploaded_file is None:
+    st.info("Загрузите файл для начала.")
+    st.stop()
 
+try:
+    df, file_hash = read_uploaded_file_bytes(uploaded_file)
+except Exception as e:
+    st.error(f"Ошибка чтения файла: {e}")
+    st.stop()
 
-# ============== Загрузка датасетов ==============
+if not {"phrase_1", "phrase_2"}.issubset(df.columns):
+    st.error("Файл должен содержать колонки phrase_1, phrase_2")
+    st.stop()
 
-def _try_read_json(raw: bytes) -> pd.DataFrame:
-    try:
-        obj = json.loads(raw.decode("utf-8"))
-        if isinstance(obj, list):
-            return pd.DataFrame(obj)
-        if isinstance(obj, dict):
-            return pd.DataFrame(obj)
-    except Exception:
-        pass
-    try:
-        return pd.read_json(io.BytesIO(raw), lines=True)
-    except Exception:
-        pass
-    raise ValueError("Не удалось распознать JSON/NDJSON")
+# ================= Preprocess =================
+st.subheader("Редактирование датасета")
+edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="dataset_editor")
+df = edited_df.copy()
+df["phrase_1"] = df["phrase_1"].map(preprocess_text)
+df["phrase_2"] = df["phrase_2"].map(preprocess_text)
 
+# ================= Embeddings =================
+phrases_all = list(set(df["phrase_1"].tolist() + df["phrase_2"].tolist()))
+phrase2idx = {p: i for i, p in enumerate(phrases_all)}
 
-def read_uploaded_file_bytes(uploaded) -> Tuple[pd.DataFrame, str]:
-    raw = uploaded.read()
-    h = file_md5(raw)
-    name = (uploaded.name or "").lower()
-    if name.endswith(".json") or name.endswith(".ndjson"):
-        df = _try_read_json(raw)
-        return df, h
-    try:
-        df = pd.read_csv(io.BytesIO(raw))
-        return df, h
-    except Exception:
-        pass
-    try:
-        df = pd.read_excel(io.BytesIO(raw))
-        return df, h
-    except Exception as e:
-        raise ValueError("Файл должен быть CSV, Excel или JSON. Ошибка: " + str(e))
+with st.spinner("Кодирую фразы..."):
+    embeddings = encode_texts_in_batches(model, phrases_all, batch_size)
 
+# compute pair scores
+scores, lexical_scores = [], []
+for _, row in df.iterrows():
+    p1, p2 = row["phrase_1"], row["phrase_2"]
+    emb1, emb2 = embeddings[phrase2idx[p1]], embeddings[phrase2idx[p2]]
+    score = float(util.cos_sim(emb1, emb2).item())
+    scores.append(score)
+    lexical_scores.append(jaccard_tokens(p1, p2))
 
-# ============== Метрики ==============
+df["score"] = scores
+df["lexical_score"] = lexical_scores
 
-def jaccard_tokens(a: str, b: str) -> float:
-    sa = set([t for t in a.split() if t])
-    sb = set([t for t in b.split() if t])
-    if not sa and not sb:
-        return 0.0
-    return len(sa & sb) / len(sa | sb)
+# ================= Tabs =================
+st.header("2. Аналитика")
+tabs = st.tabs(["Сводка", "Explore", "Retrieval Metrics", "Semantic Search", "Clustering"])
 
+# --- Summary ---
+with tabs[0]:
+    total = len(df)
+    low_cnt = int((df["score"] < low_score_threshold).sum())
+    susp_cnt = int(((df["score"] >= semantic_threshold) & (df["lexical_score"] <= lexical_threshold)).sum())
+    colA, colB, colC = st.columns(3)
+    colA.metric("Pairs", total)
+    colB.metric("Mean score", f"{df['score'].mean():.4f}")
+    colC.metric("Suspicious", susp_cnt)
 
-def precision_at_k(y_true: List[int], y_pred: List[int], k: int) -> float:
-    if not y_true or not y_pred:
-        return 0.0
-    y_true_set = set(y_true)
-    return len(set(y_pred[:k]) & y_true_set) / min(k, len(y_pred))
+    st.markdown("### Подсветка")
+    st.dataframe(style_suspicious_and_low(df, semantic_threshold, lexical_threshold, low_score_threshold),
+                 use_container_width=True)
 
+# --- Explore ---
+with tabs[1]:
+    left, right = st.columns(2)
+    with left:
+        chart = alt.Chart(pd.DataFrame({"score": df["score"]})).mark_bar().encode(
+            alt.X("score:Q", bin=alt.Bin(maxbins=30)),
+            y="count()", tooltip=["count()"]
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
 
-def mean_reciprocal_rank(y_true: List[int], y_pred: List[int]) -> float:
-    y_true_set = set(y_true)
-    for i, p in enumerate(y_pred):
-        if p in y_true_set:
-            return 1.0 / (i + 1)
-    return 0.0
+    with right:
+        chart_lex = alt.Chart(pd.DataFrame({"lexical_score": df["lexical_score"]})).mark_bar().encode(
+            alt.X("lexical_score:Q", bin=alt.Bin(maxbins=30)),
+            y="count()", tooltip=["count()"]
+        ).interactive()
+        st.altair_chart(chart_lex, use_container_width=True)
 
+    st.markdown("#### Scatter score vs lexical")
+    scatter_df = df[["score","lexical_score"]]
+    sc = alt.Chart(scatter_df).mark_point(opacity=0.6).encode(
+        x="lexical_score:Q",
+        y=alt.Y("score:Q", scale=alt.Scale(domain=[0,1])),
+        tooltip=["score","lexical_score"]
+    ).interactive()
+    st.altair_chart(sc, use_container_width=True)
 
-def ndcg_at_k(y_true: List[int], y_pred: List[int], k: int) -> float:
-    y_true_set = set(y_true)
-    dcg = 0.0
-    for i, p in enumerate(y_pred[:k]):
-        if p in y_true_set:
-            dcg += 1.0 / np.log2(i + 2)
-    idcg = sum(1.0 / np.log2(i + 2) for i in range(min(len(y_true), k)))
-    return dcg / idcg if idcg > 0 else 0.0
+# --- Retrieval metrics ---
+with tabs[2]:
+    st.subheader("Retrieval evaluation")
+    k = st.slider("k", 1, 20, 5)
+    # Простейший синтетический ground truth: phrase_1 ~ phrase_2
+    y_true, y_pred = [], []
+    for _, row in df.iterrows():
+        idx1, idx2 = phrase2idx[row["phrase_1"]], phrase2idx[row["phrase_2"]]
+        sims = util.cos_sim(embeddings[idx1], embeddings)[0].cpu().numpy()
+        sorted_idx = np.argsort(-sims)
+        y_true.append([idx2])
+        y_pred.append(sorted_idx.tolist())
 
+    prec = np.mean([precision_at_k(t, p, k) for t, p in zip(y_true, y_pred)])
+    mrr = np.mean([mean_reciprocal_rank(t, p) for t, p in zip(y_true, y_pred)])
+    ndcg = np.mean([ndcg_at_k(t, p, k) for t, p in zip(y_true, y_pred)])
+    st.json({"precision@k": prec, "MRR": mrr, "nDCG": ndcg})
 
-# ============== Модели и эмбеддинги ==============
+# --- Semantic search ---
+with tabs[3]:
+    st.subheader("Semantic Search")
+    query = st.text_input("Введите запрос")
+    topn = st.slider("Top N", 1, 20, 5)
+    if query:
+        q_emb = encode_texts_in_batches(model, [preprocess_text(query)], batch_size)
+        sims = util.cos_sim(q_emb, embeddings)[0].cpu().numpy()
+        top_idx = np.argsort(-sims)[:topn]
+        results = [(phrases_all[i], float(sims[i])) for i in top_idx]
+        res_df = pd.DataFrame(results, columns=["phrase", "score"])
+        st.dataframe(res_df, use_container_width=True)
 
-def load_model(model_id: str) -> SentenceTransformer:
-    return SentenceTransformer(model_id)
+# --- Clustering ---
+with tabs[4]:
+    st.subheader("Clustering")
+    n_clusters = st.slider("Clusters (KMeans)", 2, 20, 5)
+    emb_2d, labels = cluster_embeddings(embeddings, n_clusters)
+    cluster_df = pd.DataFrame({"x": emb_2d[:,0], "y": emb_2d[:,1], "cluster": labels, "phrase": phrases_all})
+    st.dataframe(cluster_df.head(20), use_container_width=True)
 
+    chart = alt.Chart(cluster_df).mark_circle(size=60).encode(
+        x="x:Q", y="y:Q", color="cluster:N", tooltip=["phrase"]
+    ).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
-def encode_texts_in_batches(model, texts: List[str], batch_size: int = 64) -> np.ndarray:
-    if not texts:
-        return np.array([])
-    return np.asarray(model.encode(texts, batch_size=batch_size, convert_to_numpy=True, show_progress_bar=False))
-
-
-# ============== Аналитика ==============
-
-def style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, low_score_thresh: float):
-    def highlight(row):
-        out = []
-        try:
-            score = float(row.get('score', 0))
-        except Exception:
-            score = 0.0
-        try:
-            lex = float(row.get('lexical_score', 0))
-        except Exception:
-            lex = 0.0
-        is_low_score = (score < low_score_thresh)
-        is_suspicious = (score >= sem_thresh and lex <= lex_thresh)
-        for _ in row:
-            if is_suspicious:
-                out.append('background-color: #fff2b8')
-            elif is_low_score:
-                out.append('background-color: #ffcccc')
-            else:
-                out.append('')
-        return out
-    return df.style.apply(highlight, axis=1)
-
-
-# ============== Кластеризация ==============
-
-def cluster_embeddings(embeddings: np.ndarray, n_clusters: int = 10, random_state: int = 42):
-    reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=random_state)
-    emb_2d = reducer.fit_transform(embeddings)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-    labels = kmeans.fit_predict(emb_2d)
-    return emb_2d, labels
+# ================= Export =================
+st.header("3. Экспорт")
+csv_bytes = df.to_csv(index=False).encode('utf-8')
+st.download_button("⬇️ Скачать результаты CSV", data=csv_bytes, file_name="results.csv", mime="text/csv")
