@@ -1,10 +1,10 @@
 streamlit
+sentence-transformers
+scikit-learn
+matplotlib
+umap-learn
+reportlab
 pandas
 numpy
-matplotlib
-scikit-learn
-sentence-transformers
-umap-learn
 nltk
-seaborn
 openpyxl
