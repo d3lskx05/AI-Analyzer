@@ -4,17 +4,12 @@ import pandas as pd
 import numpy as np
 import time
 import os
+import json
+import matplotlib.pyplot as plt
 from typing import List, Dict, Any
 
-# local utils
-from utils import (
-    read_uploaded_file_bytes, preprocess_text, simple_flags, jaccard_tokens,
-    load_sentence_transformer, encode_texts_in_batches, cos_sim_from_emb,
-    generate_test_pairs_from_df, detect_edge_cases, robustness_scores_for_pairs,
-    compute_binary_metrics_and_plots, reduce_embeddings_for_plot,
-    plot_2d_scatter, plot_3d_scatter, plot_model_comparison_heatmap,
-    export_report_pdf, safe_head
-)
+# local utils (import whole module to avoid import errors)
+import utils
 
 st.set_page_config(page_title="Synonym Checker — Product Edition", layout="wide")
 st.title("🔎 Synonym Checker — Product Edition")
@@ -30,12 +25,12 @@ use_cache = st.sidebar.checkbox("Cache model load (recommended)", value=True)
 
 @st.cache_resource
 def _load_model_cached(src, mid):
-    return load_sentence_transformer(src, mid)
+    return utils.load_sentence_transformer(src, mid)
 
 def load_model_from_cfg(src, mid, use_cache_flag=True):
     if use_cache_flag:
         return _load_model_cached(src, mid)
-    return load_sentence_transformer(src, mid)
+    return utils.load_sentence_transformer(src, mid)
 
 with st.sidebar.expander("A/B testing (optional)"):
     enable_ab = st.sidebar.checkbox("Enable A/B test", value=False)
@@ -84,14 +79,14 @@ with tabs[0]:
     file_hash = None
     if uploaded is not None:
         try:
-            df, file_hash = read_uploaded_file_bytes(uploaded)
+            df, file_hash = utils.read_uploaded_file_bytes(uploaded)
             st.success(f"Loaded: {len(df)} rows, hash {file_hash}")
         except Exception as e:
             st.error(f"Failed to read file: {e}")
             st.stop()
 
         st.subheader("Raw preview")
-        st.dataframe(safe_head(df, 10), use_container_width=True)
+        st.dataframe(utils.safe_head(df, 10), use_container_width=True)
 
         st.subheader("Choose text column")
         text_col = st.selectbox("Text column for single-text workflows (or left for pair-based)", ["--none--"] + list(df.columns), index=0)
@@ -126,20 +121,20 @@ with tabs[1]:
         elif not t1 or not t2:
             st.warning("Enter both phrases")
         else:
-            pt1 = preprocess_text(t1); pt2 = preprocess_text(t2)
-            emb1 = encode_texts_in_batches(model_a, [pt1], batch_size=batch_size)
-            emb2 = encode_texts_in_batches(model_a, [pt2], batch_size=batch_size)
-            score_a = cos_sim_from_emb(emb1[0], emb2[0])
-            lex = jaccard_tokens(pt1, pt2)
+            pt1 = utils.preprocess_text(t1); pt2 = utils.preprocess_text(t2)
+            emb1 = utils.encode_texts_in_batches(model_a, [pt1], batch_size=batch_size)
+            emb2 = utils.encode_texts_in_batches(model_a, [pt2], batch_size=batch_size)
+            score_a = utils.cos_sim_from_emb(emb1[0], emb2[0])
+            lex = utils.jaccard_tokens(pt1, pt2)
             st.metric("Score A", f"{score_a:.4f}")
             st.metric("Jaccard (lex)", f"{lex:.4f}")
             if model_b:
-                emb1b = encode_texts_in_batches(model_b, [pt1], batch_size=batch_size)
-                emb2b = encode_texts_in_batches(model_b, [pt2], batch_size=batch_size)
-                score_b = cos_sim_from_emb(emb1b[0], emb2b[0])
+                emb1b = utils.encode_texts_in_batches(model_b, [pt1], batch_size=batch_size)
+                emb2b = utils.encode_texts_in_batches(model_b, [pt2], batch_size=batch_size)
+                score_b = utils.cos_sim_from_emb(emb1b[0], emb2b[0])
                 st.metric("Score B", f"{score_b:.4f}", delta=f"{(score_b - score_a):+.4f}")
             # edge-case checks
-            fa = simple_flags(pt1); fb = simple_flags(pt2)
+            fa = utils.simple_flags(pt1); fb = utils.simple_flags(pt2)
             if fa["has_neg"] != fb["has_neg"]:
                 st.warning("NEGATION mismatch between phrases — model can fail here.")
             if abs(fa["len_tok"] - fb["len_tok"]) > 10:
@@ -173,16 +168,16 @@ with tabs[1]:
             if st.button("Run encoding & analysis on uploaded pairs"):
                 texts_all = list(pd.unique(df[text1_col].fillna("").astype(str).tolist() + df[text2_col].fillna("").astype(str).tolist()))
                 with st.spinner("Encoding texts..."):
-                    embs_all = encode_texts_in_batches(model_a, texts_all, batch_size=batch_size)
+                    embs_all = utils.encode_texts_in_batches(model_a, texts_all, batch_size=batch_size)
                 idx = {t: i for i, t in enumerate(texts_all)}
                 scores = []
                 for _, r in df.iterrows():
                     a = str(r[text1_col] or "")
                     b = str(r[text2_col] or "")
-                    s = cos_sim_from_emb(embs_all[idx[a]], embs_all[idx[b]])
+                    s = utils.cos_sim_from_emb(embs_all[idx[a]], embs_all[idx[b]])
                     scores.append(s)
                 df["score"] = scores
-                df["lexical_score"] = df.apply(lambda r: jaccard_tokens(str(r[text1_col] or ""), str(r[text2_col] or "")), axis=1)
+                df["lexical_score"] = df.apply(lambda r: utils.jaccard_tokens(str(r[text1_col] or ""), str(r[text2_col] or "")), axis=1)
                 st.subheader("Preview results")
                 st.dataframe(df[[text1_col, text2_col, "score", "lexical_score"]].head(50), use_container_width=True)
                 # detector for suspicious
@@ -199,7 +194,7 @@ with tabs[1]:
                     # compute metrics if labels present
                     y_true = df[label_col].astype(int).to_numpy()
                     y_scores = df["score"].to_numpy()
-                    metrics = compute_binary_metrics_and_plots(y_true, y_scores)
+                    metrics = utils.compute_binary_metrics_and_plots(y_true, y_scores)
                     rec["metrics"] = {"f1": metrics["f1"], "precision": metrics["precision"], "recall": metrics["recall"],
                                       "roc_auc": metrics["roc_auc"], "pr_auc": metrics["pr_auc"]}
                 st.session_state["history"].append(rec)
@@ -227,14 +222,14 @@ with tabs[2]:
             sample_n = st.slider("Number of samples to visualize (max)", 50, 2000, 500, 50)
             texts = df[col].dropna().astype(str).tolist()[:sample_n]
             if st.button("Plot 2D embeddings (sample)"):
-                embs = encode_texts_in_batches(model_a, texts, batch_size=batch_size)
-                coords = reduce_embeddings_for_plot(embs, method="tsne", n_components=2)
-                fig = plot_2d_scatter(coords, labels=None, title=f"2D ({len(texts)} samples)")
+                embs = utils.encode_texts_in_batches(model_a, texts, batch_size=batch_size)
+                coords = utils.reduce_embeddings_for_plot(embs, method="tsne", n_components=2)
+                fig = utils.plot_2d_scatter(coords, labels=None, title=f"2D ({len(texts)} samples)")
                 st.pyplot(fig)
             if st.button("Plot 3D embeddings (sample)"):
-                embs = encode_texts_in_batches(model_a, texts, batch_size=batch_size)
-                coords = reduce_embeddings_for_plot(embs, method="tsne", n_components=3)
-                fig = plot_3d_scatter(coords, labels=None, title=f"3D ({len(texts)} samples)")
+                embs = utils.encode_texts_in_batches(model_a, texts, batch_size=batch_size)
+                coords = utils.reduce_embeddings_for_plot(embs, method="tsne", n_components=3)
+                fig = utils.plot_3d_scatter(coords, labels=None, title=f"3D ({len(texts)} samples)")
                 st.pyplot(fig)
 
 # -----------------------
@@ -269,21 +264,21 @@ with tabs[3]:
                 df_pairs = pd.DataFrame(columns=["text1", "text2"])
             else:
                 ngen = st.number_input("Number of generated pairs", min_value=50, max_value=5000, value=500, step=50)
-                df_pairs = generate_test_pairs_from_df(base_df, text_col=st.session_state.get("uploaded_text_col") or base_df.columns[0],
+                df_pairs = utils.generate_test_pairs_from_df(base_df, text_col=st.session_state.get("uploaded_text_col") or base_df.columns[0],
                                                        n_samples=int(ngen))
         if not df_pairs.empty:
             st.write(f"Pairs for comparison: {len(df_pairs)}")
             # encode unique texts
             texts = list(pd.unique(df_pairs["text1"].astype(str).tolist() + df_pairs["text2"].astype(str).tolist()))
             with st.spinner("Encoding texts for both models..."):
-                embs_a = encode_texts_in_batches(model_a, texts, batch_size=batch_size)
-                embs_b = encode_texts_in_batches(model_b, texts, batch_size=batch_size)
+                embs_a = utils.encode_texts_in_batches(model_a, texts, batch_size=batch_size)
+                embs_b = utils.encode_texts_in_batches(model_b, texts, batch_size=batch_size)
             idx = {t: i for i, t in enumerate(texts)}
             scores_a = []; scores_b = []
             for _, r in df_pairs.iterrows():
                 a = str(r["text1"]); b = str(r["text2"])
-                sa = cos_sim_from_emb(embs_a[idx[a]], embs_a[idx[b]])
-                sb = cos_sim_from_emb(embs_b[idx[a]], embs_b[idx[b]])
+                sa = utils.cos_sim_from_emb(embs_a[idx[a]], embs_a[idx[b]])
+                sb = utils.cos_sim_from_emb(embs_b[idx[a]], embs_b[idx[b]])
                 scores_a.append(sa); scores_b.append(sb)
             df_pairs["score_a"] = scores_a
             df_pairs["score_b"] = scores_b
@@ -292,7 +287,7 @@ with tabs[3]:
             labels = ["A", "B"]
             # small matrix: mean scores
             matrix = np.array([[np.mean(scores_a), np.mean(scores_b)], [np.mean(scores_b), np.mean(scores_a)]])
-            fig_heat = plot_model_comparison_heatmap(matrix, labels=["A", "B"], title="Mean score comparison")
+            fig_heat = utils.plot_model_comparison_heatmap(matrix, labels=["A", "B"], title="Mean score comparison")
             st.pyplot(fig_heat)
             # save history
             rec = {"type": "ab_compare", "n_pairs": len(df_pairs), "mean_a": float(np.mean(scores_a)), "mean_b": float(np.mean(scores_b)),
@@ -320,10 +315,10 @@ with tabs[4]:
         if base_df is None:
             st.warning("Upload dataset first")
         else:
-            df_pairs = generate_test_pairs_from_df(base_df, text_col=st.session_state.get("uploaded_text_col") or base_df.columns[0],
+            df_pairs = utils.generate_test_pairs_from_df(base_df, text_col=st.session_state.get("uploaded_text_col") or base_df.columns[0],
                                                    n_samples=n_sample, negative_ratio=0.5)
             with st.spinner("Running robustness test..."):
-                res_df = robustness_scores_for_pairs(model_a, df_pairs, synonyms_map=synonyms_map, batch_size=batch_size)
+                res_df = utils.robustness_scores_for_pairs(model_a, df_pairs, synonyms_map=synonyms_map, batch_size=batch_size)
             st.dataframe(res_df.head(200), use_container_width=True)
             # show distribution of delta
             figd, axd = plt.subplots(figsize=(6, 3))
@@ -371,7 +366,7 @@ with tabs[5]:
             axp.axis("off")
             figs.append(figp)
             # export
-            export_report_pdf(export_fname, summary_df, figs, metadata={"model_a": model_id, "generated": str(pd.Timestamp.now())})
+            utils.export_report_pdf(export_fname, summary_df, figs, metadata={"model_a": model_id, "generated": str(pd.Timestamp.now())})
             st.success(f"Report saved to {export_fname}")
             # offer download (if file exists)
             if os.path.exists(export_fname):
