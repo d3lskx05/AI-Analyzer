@@ -231,22 +231,6 @@ if mode == "Ручной ввод":
                 else:
                     col3.write("")
 
-                if st.button("Сохранить результат в историю", key="save_manual_single"):
-                    rec = {
-                        "source": "manual_single",
-                        "pair": {"phrase_1": t1, "phrase_2": t2},
-                        "score": score_a,
-                        "metric": metric_choice,
-                        "score_b": float(score_b) if (model_b is not None) else None,
-                        "lexical_score": lex,
-                        "is_suspicious": is_suspicious_single,
-                        "model_a": model_id,
-                        "model_b": ab_model_id if enable_ab_test else None,
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    add_to_history(rec)
-                    st.success("Сохранено в истории.")
-
     with st.expander("Ввести несколько пар (каждая пара на новой строке). Формат: `фраза1 || фраза2` / TAB / `,`"):
         bulk_text = st.text_area("Вставьте пары (по одной в строке)", height=180, key="bulk_pairs")
         st.caption("Если разделитель встречается в тексте — используйте `||`.")
