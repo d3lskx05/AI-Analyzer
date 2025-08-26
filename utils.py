@@ -1,43 +1,65 @@
 # utils.py
-# Универсальные утилиты и аналитика для Synonym Checker
-from __future__ import annotations
+# Вспомогательные функции и утилиты для Synonym Checker (расширенная версия)
 
+from __future__ import annotations
 import io
 import os
 import re
 import json
-import math
-import time
-import hashlib
-import zipfile
 import tarfile
-import tempfile
+import zipfile
 import shutil
+import hashlib
+import tempfile
 from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
 
+# ====== ML / NLP ======
 from sentence_transformers import SentenceTransformer, util
 
-# Метрики/аналитика
-from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
-from sklearn.metrics import pairwise_distances
-from sklearn.metrics import accuracy_score
-from scipy.stats import spearmanr, pearsonr
-
-# UMAP опционален
+# Метрики и статистика
 try:
-    import umap  # umap-learn
-    _HAS_UMAP = True
+    from scipy.stats import spearmanr, pearsonr
 except Exception:
-    _HAS_UMAP = False
+    spearmanr = None
+    pearsonr = None
 
-# PDF отчёт
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
+# Визуализация (для PDF)
+import matplotlib
+matplotlib.use("Agg")  # безопасно для headless
+import matplotlib.pyplot as plt
+
+# Вектора, кластеризация, соседство
+try:
+    from sklearn.decomposition import PCA
+    from sklearn.neighbors import NearestNeighbors
+except Exception:
+    PCA = None
+    NearestNeighbors = None
+
+# UMAP (опционально)
+try:
+    import umap
+except Exception:
+    umap = None
+
+# PDF отчёты
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as pdf_canvas
+except Exception:
+    A4 = None
+    ImageReader = None
+    pdf_canvas = None
+
+# Datasets (опционально)
+try:
+    from datasets import load_dataset
+except Exception:
+    load_dataset = None
 
 # Морфология (опционально)
 try:
@@ -46,9 +68,16 @@ try:
 except Exception:
     _MORPH = None
 
-# ==========================
-# БАЗОВЫЕ УТИЛИТЫ
-# ==========================
+# NLTK WordNet (опционально)
+try:
+    import nltk
+    from nltk.corpus import wordnet as wn
+    _NLTK_OK = True
+except Exception:
+    _NLTK_OK = False
+    wn = None
+
+# ============== Базовые утилиты (твои, сохранены) ==============
 
 def preprocess_text(t: Any) -> str:
     if pd.isna(t):
@@ -59,6 +88,13 @@ def file_md5(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()
 
 def _try_read_json(raw: bytes) -> pd.DataFrame:
+    """
+    Попытка прочитать JSON/NDJSON в DataFrame.
+    Поддержка:
+      - список объектов
+      - NDJSON
+      - columns-orient dict
+    """
     try:
         obj = json.loads(raw.decode("utf-8"))
         if isinstance(obj, list):
@@ -101,7 +137,7 @@ def parse_topics_field(val) -> List[str]:
         try:
             parsed = json.loads(s)
             if isinstance(parsed, list):
-                return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+                return [str(x).strip() for x in parsed if str(x).strip()]
         except Exception:
             pass
     for sep in [";", "|", ","]:
@@ -118,8 +154,7 @@ def jaccard_tokens(a: str, b: str) -> float:
     union = sa | sb
     return len(inter) / len(union) if union else 0.0
 
-# Подсветка (для st.dataframe.style)
-def style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, low_score_thresh: float):
+def simple_style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, low_score_thresh: float):
     def highlight(row):
         out = []
         try:
@@ -131,7 +166,7 @@ def style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, low_score
         except Exception:
             lex = 0.0
         is_low_score = (score < low_score_thresh)
-        is_suspicious = (score >= sem_thresh) and (lex <= lex_thresh)
+        is_suspicious = (score >= sem_thresh and lex <= lex_thresh)
         for _ in row:
             if is_suspicious:
                 out.append('background-color: #fff2b8')  # жёлтый
@@ -142,8 +177,7 @@ def style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, low_score
         return out
     return df.style.apply(highlight, axis=1)
 
-# Простые признаки
-NEG_PAT = re.compile(r"\bне\b|\bни\b|\bнет\b|\bnot\b|\bno\b|\bnever\b", flags=re.IGNORECASE)
+NEG_PAT = re.compile(r"\bне\b|\bни\b|\bнет\b", flags=re.IGNORECASE)
 NUM_PAT = re.compile(r"\b\d+\b")
 DATE_PAT = re.compile(r"\b\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?\b")
 
@@ -172,8 +206,7 @@ def bootstrap_diff_ci(a: np.ndarray, b: np.ndarray, n_boot: int = 500, seed: int
     n = min(len(a), len(b))
     if n == 0:
         return 0.0, 0.0, 0.0
-    a = np.asarray(a)
-    b = np.asarray(b)
+    a = np.asarray(a); b = np.asarray(b)
     for _ in range(n_boot):
         idx = rng.integers(0, n, n)
         diffs.append(np.mean(a[idx] - b[idx]))
@@ -183,9 +216,7 @@ def bootstrap_diff_ci(a: np.ndarray, b: np.ndarray, n_boot: int = 500, seed: int
     high = float(np.quantile(diffs, 1-(1-ci)/2))
     return mean_diff, low, high
 
-# ==========================
-# МОДЕЛИ
-# ==========================
+# ============== Загрузка модели ==============
 
 def download_file_from_gdrive(file_id: str) -> str:
     import gdown
@@ -211,15 +242,16 @@ def download_file_from_gdrive(file_id: str) -> str:
             pass
     return model_dir
 
-def load_model_from_source(source: str, identifier: str) -> SentenceTransformer:
+# NB: кэширование должно делаться на стороне Streamlit (st.cache_resource),
+# здесь оставляем "чистую" функцию.
+def _load_model_from_source(source: str, identifier: str) -> SentenceTransformer:
     if source == "huggingface":
         model_path = identifier
     elif source == "google_drive":
         model_path = download_file_from_gdrive(identifier)
     else:
         raise ValueError("Unknown model source")
-    model = SentenceTransformer(model_path)
-    return model
+    return SentenceTransformer(model_path)
 
 def encode_texts_in_batches(model: SentenceTransformer, texts: List[str], batch_size: int = 64) -> np.ndarray:
     if not texts:
@@ -227,232 +259,324 @@ def encode_texts_in_batches(model: SentenceTransformer, texts: List[str], batch_
     embs = model.encode(texts, batch_size=batch_size, convert_to_numpy=True, show_progress_bar=False)
     return np.asarray(embs)
 
-# ==========================
-# ДОП. МЕТРИКИ
-# ==========================
+# ============== Новые функции: метрики и соседство ==============
 
-def sim_cos(a: np.ndarray, b: np.ndarray) -> float:
+def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     return float(util.cos_sim(a, b).item())
 
-def sim_dot(a: np.ndarray, b: np.ndarray) -> float:
+def dot_product(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b))
 
-def sim_l2(a: np.ndarray, b: np.ndarray) -> float:
-    return float(-np.linalg.norm(a - b))  # чем больше, тем ближе (отрицательная дистанция)
+def euclidean_dist(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.linalg.norm(a - b))
 
-def compute_similarity(a: np.ndarray, b: np.ndarray, metric: str = "cosine") -> float:
-    if metric == "cosine":
-        return sim_cos(a, b)
-    if metric == "dot":
-        return sim_dot(a, b)
-    if metric in ("euclidean", "l2"):
-        return sim_l2(a, b)
-    raise ValueError("Unknown metric")
+def manhattan_dist(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.sum(np.abs(a - b)))
 
-# ==========================
-# kNN / Top-N
-# ==========================
+def pair_score(a: np.ndarray, b: np.ndarray, metric: str = "cosine") -> float:
+    m = metric.lower()
+    if m == "cosine":
+        return cosine_sim(a, b)
+    if m == "dot":
+        return dot_product(a, b)
+    if m == "euclidean":
+        # для «distance» нормализуем в [0..1] по эвристике
+        d = euclidean_dist(a, b)
+        return -d
+    if m == "manhattan":
+        d = manhattan_dist(a, b)
+        return -d
+    return cosine_sim(a, b)
 
-def build_knn(embeddings: np.ndarray, metric: str = "cosine", n_neighbors: int = 10) -> NearestNeighbors:
-    # Для cosine используем метрику 'cosine', для l2 — 'euclidean'
-    met = "cosine" if metric in ("cosine", "dot") else "euclidean"
-    # Для dot product — нормализуем эмбеддинги и используем cosine
-    X = embeddings.copy()
-    if metric == "dot":
-        norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-12
-        X = X / norms
-        met = "cosine"
-    nn = NearestNeighbors(n_neighbors=n_neighbors, metric=met)
-    nn.fit(X)
-    return nn
+def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors: int = 5):
+    """
+    Возвращает индекс sklearn NearestNeighbors (или None, если sklearn недоступен),
+    и список (distances, indices).
+    """
+    if NearestNeighbors is None:
+        return None, None, None
+    m = metric.lower()
+    if m == "cosine":
+        nn_metric = "cosine"
+    elif m == "dot":
+        # для dot продукта можно имитировать через cosine по нормированным векторам
+        nn_metric = "cosine"
+        # нормировка снаружи
+        embeddings = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-12)
+    elif m == "euclidean":
+        nn_metric = "euclidean"
+    elif m == "manhattan":
+        nn_metric = "manhattan"
+    else:
+        nn_metric = "cosine"
+    nn = NearestNeighbors(n_neighbors=min(n_neighbors, len(embeddings)), metric=nn_metric)
+    nn.fit(embeddings)
+    dists, idxs = nn.kneighbors(embeddings, return_distance=True)
+    return nn, dists, idxs
 
-def query_topn(nn: NearestNeighbors, embeddings: np.ndarray, idx: int, topn: int = 5, metric: str = "cosine") -> List[Tuple[int, float]]:
-    X = embeddings.copy()
-    if metric == "dot":
-        norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-12
-        X = X / norms
-    dists, inds = nn.kneighbors(X[idx:idx+1], n_neighbors=min(topn+1, len(X)))
-    inds = inds[0].tolist()
-    dists = dists[0].tolist()
-    out = []
-    for i, d in zip(inds, dists):
-        if i == idx:
-            continue
-        # конвертация расстояния в "похожесть"
-        if nn.metric == "cosine":
-            sim = 1.0 - float(d)
-        else:
-            sim = -float(d)
-        out.append((i, sim))
-    return out[:topn]
+# ============== Новые функции: визуализация эмбеддингов ==============
 
-# ==========================
-# DIMRED (PCA / UMAP)
-# ==========================
-
-def reduce_embeddings(embeddings: np.ndarray, method: str = "umap", n_components: int = 2, random_state: int = 42) -> np.ndarray:
-    if method == "umap" and _HAS_UMAP:
+def project_embeddings(embeddings: np.ndarray, method: str = "pca", n_components: int = 2, random_state: int = 42) -> Optional[np.ndarray]:
+    if embeddings is None or len(embeddings) == 0:
+        return None
+    method = method.lower()
+    if method == "pca":
+        if PCA is None:
+            return None
+        pca = PCA(n_components=n_components, random_state=random_state)
+        return pca.fit_transform(embeddings)
+    elif method == "umap":
+        if umap is None:
+            return None
         reducer = umap.UMAP(n_components=n_components, random_state=random_state, n_neighbors=15, min_dist=0.1)
         return reducer.fit_transform(embeddings)
-    # Fallback на PCA
-    pca = PCA(n_components=n_components, random_state=random_state)
-    return pca.fit_transform(embeddings)
-
-# ==========================
-# ROBUSTNESS / BIAS
-# ==========================
-
-_REPLACEMENTS_SYNONYM = {
-    # мини-словарик (язык-агностичные базовые случаи)
-    "и": "а также",
-    "или": "либо",
-    "быстро": "скоростно",
-    "медленно": "неторопливо",
-    "не": "не",
-    "not": "not",
-    "good": "nice",
-    "bad": "awful",
-}
-
-def toggle_negation(text: str) -> str:
-    # простая эвристика: добавляем/убираем "не"/"not" около первого глагола/прилагательного
-    # если уже есть отрицание — попробуем убрать
-    if re.search(r"\bне\b", text, flags=re.I):
-        return re.sub(r"\bне\b\s*", "", text, count=1, flags=re.I).strip()
-    if re.search(r"\bnot\b", text, flags=re.I):
-        return re.sub(r"\bnot\b\s*", "", text, count=1, flags=re.I).strip()
-    # иначе — добавим "не" перед первым словом, которое не артикль/союз
-    toks = text.split()
-    for i, t in enumerate(toks):
-        if len(t) > 2:
-            toks.insert(i, "не")
-            break
-    return " ".join(toks)
-
-def tweak_numbers(text: str, delta: int = 1) -> str:
-    def repl(m):
-        try:
-            v = int(m.group(0))
-            return str(max(v + delta, 0))
-        except Exception:
-            return m.group(0)
-    return re.sub(r"\b\d+\b", repl, text)
-
-def replace_synonyms(text: str) -> str:
-    toks = text.split()
-    out = []
-    for t in toks:
-        rep = _REPLACEMENTS_SYNONYM.get(t.lower(), None)
-        out.append(rep if rep else t)
-    return " ".join(out)
-
-def drop_stop_like(text: str) -> str:
-    # очень простой "стоп-ворд" дроппер для шума
-    return " ".join([t for t in text.split() if t.lower() not in {"и", "а", "но", "или", "the", "a", "an", "to"}])
-
-def generate_perturbations(text: str) -> Dict[str, str]:
-    """Возвращает набор вариаций текста для robustness-проверок."""
-    t = preprocess_text(text)
-    return {
-        "orig": t,
-        "neg_flip": toggle_negation(t),
-        "num_plus1": tweak_numbers(t, +1),
-        "num_minus1": tweak_numbers(t, -1),
-        "synonymish": replace_synonyms(t),
-        "drop_stop": drop_stop_like(t),
-        "swap_words": " ".join(reversed(t.split())) if len(t.split()) > 1 else t,
-    }
-
-def bias_edge_flags(p1: str, p2: str) -> Dict[str, bool]:
-    f1 = simple_flags(p1); f2 = simple_flags(p2)
-    return {
-        "neg_mismatch": f1["has_neg"] ^ f2["has_neg"],
-        "num_mismatch": f1["has_num"] ^ f2["has_num"],
-        "date_mismatch": f1["has_date"] ^ f2["has_date"],
-    }
-
-# ==========================
-# БЕНЧМАРКИ / КОРРЕЛЯЦИИ
-# ==========================
-
-def compute_correlations(df: pd.DataFrame, score_col: str, gold_col: str) -> Dict[str, float]:
-    """
-    Если gold_col — вещественная «истинная» похожесть (0..1/0..5), считаем Spearman/Pearson.
-    Если gold_col бинарный {0,1}, считаем accuracy (по оптимальному порогу).
-    """
-    scores = df[score_col].astype(float).to_numpy()
-    gold = df[gold_col].to_numpy()
-
-    # бинарный?
-    is_binary = set(pd.Series(gold).dropna().unique()).issubset({0, 1, 0.0, 1.0})
-
-    out = {}
-    if is_binary:
-        # подберём порог по максимуму accuracy
-        best_acc, best_thr = -1.0, 0.5
-        for thr in np.linspace(0.0, 1.0, 101):
-            pred = (scores >= thr).astype(int)
-            acc = accuracy_score(gold, pred)
-            if acc > best_acc:
-                best_acc, best_thr = acc, thr
-        out.update({"accuracy": float(best_acc), "best_threshold": float(best_thr)})
     else:
-        # нормализуем gold в [0,1] если похоже на 0..5
-        g = gold.astype(float)
-        g_min, g_max = np.nanmin(g), np.nanmax(g)
-        if g_max - g_min > 1.5:  # вероятно шкала 0..5
-            g = (g - g_min) / (g_max - g_min + 1e-12)
-        sp = spearmanr(scores, g, nan_policy="omit")
-        pr = pearsonr(scores, g)
-        out.update({
-            "spearman": float(sp.correlation) if sp.correlation is not None else np.nan,
-            "pearson": float(pr.statistic) if hasattr(pr, "statistic") else float(pr[0]),
-        })
+        return None
+
+# ============== Новые функции: бенчмаркинг ==============
+
+def _load_builtin_sts_sample(lang: str = "en") -> pd.DataFrame:
+    """Очень маленький встроенный STS-семпл на случай отсутствия datasets."""
+    data = [
+        ("A man is playing guitar", "A person plays the guitar", 4.2),
+        ("A man is playing guitar", "A child is playing soccer", 0.8),
+        ("Two dogs are running", "A couple of dogs run", 4.0),
+        ("He is not happy", "He is happy", 1.0),
+        ("The price is 100", "The price is 101", 3.0),
+    ]
+    return pd.DataFrame(data, columns=["sentence1", "sentence2", "score"])
+
+def load_sts_dataset(name: str = "stsb_multi_mt", lang: str = "en") -> pd.DataFrame:
+    """
+    Загружает STS-датасет через HuggingFace datasets (если доступно),
+    иначе — возвращает маленький встроенный семпл.
+    name варианты:
+      - "stsb_multi_mt" (поддерживает много языков)
+      - "stsb" (англ. GLUE STS-B)
+    """
+    if load_dataset is None:
+        return _load_builtin_sts_sample(lang)
+    try:
+        if name == "stsb":
+            ds = load_dataset("glue", "stsb")
+            df = pd.DataFrame(ds["validation"])
+            df = df.rename(columns={"sentence1": "sentence1", "sentence2": "sentence2", "label": "score"})
+            # GLUE метка в [0..5]? В GLUE STS-B лейбл [0..5], иногда делят на 5 для [0..1]
+            return df[["sentence1", "sentence2", "score"]]
+        else:
+            ds = load_dataset("stsb_multi_mt", name=lang)
+            df = pd.DataFrame(ds["test"])
+            return df[["sentence1", "sentence2", "similarity_score"]].rename(columns={"similarity_score": "score"})
+    except Exception:
+        return _load_builtin_sts_sample(lang)
+
+def evaluate_sts(model: SentenceTransformer, df: pd.DataFrame, metric: str = "cosine", batch_size: int = 64) -> Dict[str, Any]:
+    """
+    Считает Spearman / Pearson корреляцию предсказанных сходств с человеческими оценками (score).
+    Возвращает также preds и дополнительные поля.
+    """
+    s1 = df["sentence1"].map(preprocess_text).tolist()
+    s2 = df["sentence2"].map(preprocess_text).tolist()
+    y = df["score"].astype(float).to_numpy()
+
+    emb1 = encode_texts_in_batches(model, s1, batch_size)
+    emb2 = encode_texts_in_batches(model, s2, batch_size)
+
+    preds = []
+    for i in range(len(s1)):
+        preds.append(pair_score(emb1[i], emb2[i], metric=metric))
+    preds = np.array(preds, dtype=float)
+
+    # Нормализация для корреляции: если метрика distance (мы вернули отрицательные),
+    # можно умножить на -1, чтобы корреляция интерпретировалась одинаково
+    if metric.lower() in {"euclidean", "manhattan"}:
+        preds = -preds
+
+    res = {"metric": metric, "n": len(df), "preds": preds, "labels": y}
+    # Корреляции
+    if spearmanr is not None:
+        sp = spearmanr(preds, y).correlation
+        res["spearman"] = float(sp) if sp is not None else None
+    else:
+        res["spearman"] = None
+    if pearsonr is not None:
+        try:
+            pr = pearsonr(preds, y)[0]
+        except Exception:
+            pr = None
+        res["pearson"] = float(pr) if pr is not None else None
+    else:
+        res["pearson"] = None
+    return res
+
+# ============== Новые функции: robustness / bias ==============
+
+def _wordnet_synonyms(word: str) -> List[str]:
+    out = set()
+    if not _NLTK_OK or wn is None:
+        return []
+    try:
+        for syn in wn.synsets(word):
+            for lemma in syn.lemmas():
+                w = lemma.name().replace("_", " ").lower()
+                if w != word.lower():
+                    out.add(w)
+    except Exception:
+        pass
+    return list(out)
+
+def generate_robust_variants(text: str, max_per_word: int = 2) -> List[str]:
+    """
+    Генерирует простые варианты фразы:
+      - синонимизация (если доступен WordNet, англ.)
+      - отрицания (вставка/удаление "не")
+      - подмена чисел
+      - перестановка пары соседних слов
+    """
+    t = preprocess_text(text)
+    toks = t.split()
+    variants = set()
+
+    # перестановки соседних слов (ограничим до 2 позиций)
+    for i in range(min(len(toks) - 1, 2)):
+        tmp = toks.copy()
+        tmp[i], tmp[i+1] = tmp[i+1], tmp[i]
+        variants.add(" ".join(tmp))
+
+    # отрицания: если есть "не" -> убрать; иначе добавить перед глаголом/первым словом
+    if any(tok == "не" for tok in toks):
+        variants.add(" ".join([tok for tok in toks if tok != "не"]))
+    else:
+        if toks:
+            variants.add("не " + " ".join(toks))
+
+    # числа: заменим первые встретившиеся цифры (+1)
+    def bump_numbers(s: str) -> str:
+        return re.sub(r"\d+", lambda m: str(int(m.group(0)) + 1), s)
+    if re.search(r"\d+", t):
+        variants.add(bump_numbers(t))
+
+    # синонимизация (простая, англ. через WordNet)
+    for i, w in enumerate(toks[:5]):  # ограничим до первых 5 слов
+        syns = _wordnet_synonyms(w)[:max_per_word]
+        for s in syns:
+            tmp = toks.copy()
+            tmp[i] = s
+            variants.add(" ".join(tmp))
+
+    return [v for v in variants if v and v != t]
+
+def robustness_probe(model: SentenceTransformer, pairs: List[Tuple[str, str]], metric: str = "cosine", batch_size: int = 64) -> pd.DataFrame:
+    """
+    Для каждой пары генерирует вариации первой фразы и проверяет изменение score.
+    Возвращает таблицу с delta.
+    """
+    rows = []
+    for (a, b) in pairs:
+        base_a = preprocess_text(a); base_b = preprocess_text(b)
+        base_emb_a = encode_texts_in_batches(model, [base_a], batch_size)[0]
+        base_emb_b = encode_texts_in_batches(model, [base_b], batch_size)[0]
+        base_score = pair_score(base_emb_a, base_emb_b, metric)
+
+        variants = generate_robust_variants(base_a)
+        if not variants:
+            rows.append({"phrase_1": base_a, "phrase_2": base_b, "variant": base_a, "score": base_score, "delta": 0.0, "type": "base"})
+            continue
+
+        v_embs = encode_texts_in_batches(model, variants, batch_size)
+        for v_text, v_emb in zip(variants, v_embs):
+            s = pair_score(v_emb, base_emb_b, metric)
+            rows.append({"phrase_1": base_a, "phrase_2": base_b, "variant": v_text, "score": s, "delta": s - base_score, "type": "variant"})
+        rows.append({"phrase_1": base_a, "phrase_2": base_b, "variant": base_a, "score": base_score, "delta": 0.0, "type": "base"})
+    return pd.DataFrame(rows)
+
+# ============== Новые функции: автодетектор аномалий/подозрительных ==============
+
+def find_suspicious(df: pd.DataFrame,
+                    score_col: str = "score",
+                    lexical_col: str = "lexical_score",
+                    label_col: Optional[str] = None,
+                    semantic_threshold: float = 0.80,
+                    lexical_threshold: float = 0.30,
+                    low_score_threshold: float = 0.75) -> Dict[str, pd.DataFrame]:
+    """
+    Возвращает dict с DataFrame-ами:
+      - high_sem_low_lex
+      - label_mismatch_positives (label==1 & score<low_score)
+      - label_mismatch_negatives (label==0 & score>=semantic_threshold)
+    """
+    out: Dict[str, pd.DataFrame] = {}
+    if score_col not in df.columns:
+        return out
+    # high-sem / low-lex
+    if lexical_col in df.columns:
+        out["high_sem_low_lex"] = df[(df[score_col] >= semantic_threshold) & (df[lexical_col] <= lexical_threshold)].copy()
+    # label mismatches
+    if label_col and label_col in df.columns:
+        out["label_mismatch_positives"] = df[(df[label_col] == 1) & (df[score_col] < low_score_threshold)].copy()
+        out["label_mismatch_negatives"] = df[(df[label_col] == 0) & (df[score_col] >= semantic_threshold)].copy()
     return out
 
-# ==========================
-# ОТЧЁТ (PDF)
-# ==========================
+# ============== Новые функции: PDF-отчёт ==============
 
-def _save_temp_plot(fig) -> str:
-    import matplotlib.pyplot as plt
-    tmp = os.path.join(tempfile.gettempdir(), f"sc_plot_{int(time.time()*1000)}.png")
-    fig.savefig(tmp, dpi=160, bbox_inches="tight")
-    plt.close(fig)
-    return tmp
+def _save_plot_hist(values: np.ndarray, title: str, path: str):
+    plt.figure()
+    plt.hist(values, bins=30)
+    plt.title(title)
+    plt.xlabel("value")
+    plt.ylabel("count")
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
 
-def build_pdf_report(
-    pdf_path: str,
-    title: str,
-    summary: Dict[str, Any],
-    charts: List[str]  # пути к png графикам
-) -> str:
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    W, H = A4
-    y = H - 50
+def _save_scatter(x: np.ndarray, y: np.ndarray, xlabel: str, ylabel: str, title: str, path: str):
+    plt.figure()
+    plt.scatter(x, y, alpha=0.5)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
+
+def export_pdf_report(report_json: Dict[str, Any], charts: Dict[str, str], output_path: str) -> Optional[str]:
+    """
+    report_json — словарь с ключевыми метриками/сводкой
+    charts — словарь {имя: путь_к_png}, которые будут вставлены
+    """
+    if pdf_canvas is None or A4 is None or ImageReader is None:
+        return None
+    c = pdf_canvas.Canvas(output_path, pagesize=A4)
+    w, h = A4
+
+    # Заголовок
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(40, y, title)
-    y -= 30
-    c.setFont("Helvetica", 10)
-    for k, v in summary.items():
-        line = f"{k}: {v}"
-        c.drawString(40, y, line)
-        y -= 14
-        if y < 100:
+    c.drawString(40, h - 50, "Synonym Checker — Report")
+
+    # Сводка (первые 20 ключей)
+    c.setFont("Helvetica", 9)
+    y = h - 80
+    c.drawString(40, y, "Summary:")
+    y -= 14
+    for k, v in list(report_json.items())[:20]:
+        line = f"- {k}: {v}"
+        c.drawString(50, y, line[:110])
+        y -= 12
+        if y < 120:
             c.showPage()
-            y = H - 50
-    for img_path in charts:
-        if y < 300:
-            c.showPage()
-            y = H - 50
+            y = h - 40
+
+    # Картинки
+    c.setFont("Helvetica-Bold", 12)
+    for name, path in charts.items():
         try:
-            img = ImageReader(img_path)
-            iw, ih = img.getSize()
-            scale = min((W-80)/iw, 400/ih)
-            c.drawImage(img, 40, y-ih*scale, width=iw*scale, height=ih*scale)
-            y -= ih*scale + 20
+            img = ImageReader(path)
+            c.showPage()
+            c.drawString(40, h - 40, name)
+            c.drawImage(img, 40, 80, width=w-80, height=h-160, preserveAspectRatio=True, anchor='sw')
         except Exception:
             continue
+
     c.showPage()
     c.save()
-    return pdf_path
+    return output_path
