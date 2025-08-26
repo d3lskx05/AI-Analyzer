@@ -117,26 +117,25 @@ if st.sidebar.button("Скачать историю в JSON"):
     else:
         st.sidebar.warning("История пустая")
 
-# ======== Режим: выбор ввода (без потери данных) ========
+# ======== Режим: выбор ввода (без сброса и без rerun) ========
 if "mode" not in st.session_state:
     st.session_state.mode = "Файл (CSV/XLSX/JSON)"
 
 mode_choice = st.radio(
     "Режим проверки",
     ["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"],
-    index=0 if st.session_state.mode == "Файл (CSV/XLSX/JSON)" else (1 if st.session_state.mode == "Ручной ввод" else 2),
-    horizontal=True
+    index=["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"].index(st.session_state.mode),
+    horizontal=True,
+    key="mode_selector"
 )
 
-# Смена режима
+# Обновляем режим без rerun
 if mode_choice != st.session_state.mode:
-    # Очищаем ручной ввод при уходе с него
+    # Очистка данных ручного ввода при уходе с него
     if st.session_state.mode == "Ручной ввод":
         for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
-            if k in st.session_state:
-                st.session_state.pop(k)
+            st.session_state.pop(k, None)
     st.session_state.mode = mode_choice
-    st.rerun()
 
 mode = st.session_state.mode
 
@@ -149,19 +148,20 @@ if mode == "Файл (CSV/XLSX/JSON)":
         key="file_upload_main"
     )
 
-# Сохраняем загруженный файл в session_state, чтобы не терялся при смене режима
+# Сохраняем загруженный файл в session_state
 if uploaded_file is not None:
     st.session_state["uploaded_file"] = uploaded_file
 elif "uploaded_file" in st.session_state:
     uploaded_file = st.session_state["uploaded_file"]
 
-# ======== Подсказка, если файл загружен, но активен другой режим ========
-if uploaded_file is not None and mode != "Файл (CSV/XLSX/JSON)":
-    with st.container():
+# ======== Подсказка и кнопка управления файлом ========
+if uploaded_file is not None:
+    if mode != "Файл (CSV/XLSX/JSON)":
         st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
-        if st.button("Переключиться обратно к файлу", key="switch_back_to_file"):
-            st.session_state.mode = "Файл (CSV/XLSX/JSON)"
-            st.rerun()
+    # Кнопка для удаления загруженного файла
+    if st.button("Удалить загруженный файл", key="delete_uploaded_file"):
+        st.session_state.pop("uploaded_file", None)
+        uploaded_file = None
 
 # ======== Общие хелперы для вычислений ========
 def compute_pair_scores(model, pairs: List[Tuple[str, str]], metric: str, batch_size: int):
