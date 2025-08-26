@@ -141,7 +141,11 @@ if mode_choice != st.session_state.mode:
 mode = st.session_state.mode
 
 # ======== Загрузка файла с кэшированием ========
-uploaded_file = st.file_uploader("Выберите файл", type=["csv", "xlsx", "xls", "json", "ndjson"])
+uploaded_file = st.file_uploader(
+    "Выберите файл", 
+    type=["csv", "xlsx", "xls", "json", "ndjson"], 
+    key="file_upload_main"  # Уникальный ключ для избежания дубликатов
+)
 
 # Сохраняем загруженный файл в session_state, чтобы не терялся при rerun
 if uploaded_file is not None:
@@ -153,7 +157,7 @@ elif "uploaded_file" in st.session_state:
 if uploaded_file is not None and mode != "Файл (CSV/XLSX/JSON)":
     with st.container():
         st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
-        if st.button("Переключиться обратно к файлу"):
+        if st.button("Переключиться обратно к файлу", key="switch_back_to_file"):
             st.session_state.mode = "Файл (CSV/XLSX/JSON)"
             st.rerun()
 
