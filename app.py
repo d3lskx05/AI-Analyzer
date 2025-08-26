@@ -140,20 +140,22 @@ if mode_choice != st.session_state.mode:
 
 mode = st.session_state.mode
 
-# ======== Загрузка файла с кэшированием ========
-uploaded_file = st.file_uploader(
-    "Выберите файл", 
-    type=["csv", "xlsx", "xls", "json", "ndjson"], 
-    key="file_upload_main"  # Уникальный ключ для избежания дубликатов
-)
+# ======== Загрузка файла только для режима "Файл" ========
+uploaded_file = None
+if mode == "Файл (CSV/XLSX/JSON)":
+    uploaded_file = st.file_uploader(
+        "Выберите файл", 
+        type=["csv", "xlsx", "xls", "json", "ndjson"], 
+        key="file_upload_main"
+    )
 
-# Сохраняем загруженный файл в session_state, чтобы не терялся при rerun
+# Сохраняем загруженный файл в session_state, чтобы не терялся при смене режима
 if uploaded_file is not None:
     st.session_state["uploaded_file"] = uploaded_file
 elif "uploaded_file" in st.session_state:
     uploaded_file = st.session_state["uploaded_file"]
 
-# ======== Подсказка, если файл есть, но активен другой режим ========
+# ======== Подсказка, если файл загружен, но активен другой режим ========
 if uploaded_file is not None and mode != "Файл (CSV/XLSX/JSON)":
     with st.container():
         st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
