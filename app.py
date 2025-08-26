@@ -758,9 +758,40 @@ if mode == "Файл (CSV/XLSX/JSON)":
                                    lexical_threshold=lexical_threshold,
                                    low_score_threshold=low_score_threshold)
             st.markdown("### Подозрительные / аномальные случаи")
-            for k, sdf in susp.items():
-                st.markdown(f"**{k}** — {len(sdf)}")
-                if not sdf.empty:
-                    st.dataframe(sdf, use_container_width=True)
-                    s_csv = sdf.to_csv(index=False).encode("utf-8")
-                    st.download_button(f"⬇️ Скачать {k}.csv", data=s_csv, file_name=f"{k}.csv", mime="text/csv")
+
+# Общая сводка
+total_rows = len(df)
+total_anom = sum(len(sdf) for sdf in susp.values())
+st.info(f"Найдено **{total_anom}** подозрительных случаев из {total_rows} "
+        f"({(total_anom/total_rows*100 if total_rows else 0):.1f}%)")
+
+# Описи категорий
+descriptions = {
+    "hi_sem_low_lex": "Высокая семантическая близость, но низкая лексическая схожесть "
+                      f"(score ≥ {semantic_threshold}, lex ≤ {lexical_threshold})",
+    "low_sem": f"Слишком низкая семантическая близость (score < {low_score_threshold})",
+    "fn_like": "False Negative-like — label=1, но модель дала низкий score",
+    "fp_like": "False Positive-like — label=0, но модель дала высокий score",
+    "used_threshold": "Использованный порог для классификации"
+}
+
+# Обход категорий
+for k, sdf in susp.items():
+    st.markdown(f"**{k}** — {len(sdf)} случаев")
+    if k in descriptions:
+        st.caption(descriptions[k])
+
+    if not sdf.empty:
+        # сортировка для наглядности
+        if "score" in sdf.columns:
+            sdf = sdf.sort_values("score", ascending=(k in ["low_sem","fn_like"]))
+        st.dataframe(sdf, use_container_width=True, height=300)
+
+        # скачивание
+        s_csv = sdf.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            f"⬇️ Скачать {k}.csv", 
+            data=s_csv, 
+            file_name=f"{k}.csv", 
+            mime="text/csv"
+        )
