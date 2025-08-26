@@ -6,3 +6,4 @@ scikit-learn
 sentence-transformers
 umap-learn
 nltk
+seaborn
