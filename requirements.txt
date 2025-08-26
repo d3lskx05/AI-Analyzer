@@ -7,3 +7,4 @@ sentence-transformers
 umap-learn
 nltk
 seaborn
+openpyxl
