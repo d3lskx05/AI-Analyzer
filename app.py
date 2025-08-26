@@ -117,7 +117,7 @@ if st.sidebar.button("Скачать историю в JSON"):
     else:
         st.sidebar.warning("История пустая")
 
-# ======== Режим: выбор ввода (без сброса и без rerun) ========
+# ======== Режим: выбор ввода (без сброса и с расширенными функциями) ========
 if "mode" not in st.session_state:
     st.session_state.mode = "Файл (CSV/XLSX/JSON)"
 
@@ -154,14 +154,26 @@ if uploaded_file is not None:
 elif "uploaded_file" in st.session_state:
     uploaded_file = st.session_state["uploaded_file"]
 
-# ======== Подсказка и кнопка управления файлом ========
+# ======== Подсказка и кнопки управления ========
 if uploaded_file is not None:
     if mode != "Файл (CSV/XLSX/JSON)":
-        st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
+        with col2:
+            if st.button("Переключиться к файлу", key="switch_to_file"):
+                st.session_state.mode = "Файл (CSV/XLSX/JSON)"
     # Кнопка для удаления загруженного файла
     if st.button("Удалить загруженный файл", key="delete_uploaded_file"):
         st.session_state.pop("uploaded_file", None)
         uploaded_file = None
+
+# ======== Кнопка очистки ручного ввода ========
+if mode == "Ручной ввод":
+    if "manual_text1" in st.session_state or "manual_text2" in st.session_state or "bulk_pairs" in st.session_state:
+        if st.button("Очистить введённые данные", key="clear_manual_input"):
+            for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
+                st.session_state.pop(k, None)
 
 # ======== Общие хелперы для вычислений ========
 def compute_pair_scores(model, pairs: List[Tuple[str, str]], metric: str, batch_size: int):
