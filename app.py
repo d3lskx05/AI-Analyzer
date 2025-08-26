@@ -118,62 +118,22 @@ if st.sidebar.button("Скачать историю в JSON"):
         st.sidebar.warning("История пустая")
 
 # ======== Режим: выбор ввода (без сброса и с расширенными функциями) ========
-if "mode" not in st.session_state:
-    st.session_state.mode = "Файл (CSV/XLSX/JSON)"
-
-mode_choice = st.radio(
-    "Режим проверки",
-    ["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"],
-    index=["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"].index(st.session_state.mode),
-    horizontal=True,
-    key="mode_selector"
-)
-
-# Обновляем режим без rerun
-if mode_choice != st.session_state.mode:
-    # Очистка данных ручного ввода при уходе с него
-    if st.session_state.mode == "Ручной ввод":
-        for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
-            st.session_state.pop(k, None)
-    st.session_state.mode = mode_choice
-
-mode = st.session_state.mode
-
-# ======== Загрузка файла только для режима "Файл" ========
-uploaded_file = None
-if mode == "Файл (CSV/XLSX/JSON)":
-    uploaded_file = st.file_uploader(
-        "Выберите файл", 
-        type=["csv", "xlsx", "xls", "json", "ndjson"], 
-        key="file_upload_main"
-    )
-
-# Сохраняем загруженный файл в session_state
-if uploaded_file is not None:
-    st.session_state["uploaded_file"] = uploaded_file
-elif "uploaded_file" in st.session_state:
-    uploaded_file = st.session_state["uploaded_file"]
-
-# ======== Подсказка и кнопки управления ========
-if uploaded_file is not None:
-    if mode != "Файл (CSV/XLSX/JSON)":
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.info(f"Загружен файл **{uploaded_file.name}**, но в режиме **{mode}** он не используется.")
-        with col2:
-            if st.button("Переключиться к файлу", key="switch_to_file"):
-                st.session_state.mode = "Файл (CSV/XLSX/JSON)"
-    # Кнопка для удаления загруженного файла
-    if st.button("Удалить загруженный файл", key="delete_uploaded_file"):
-        st.session_state.pop("uploaded_file", None)
-        uploaded_file = None
-
-# ======== Кнопка очистки ручного ввода ========
-if mode == "Ручной ввод":
-    if "manual_text1" in st.session_state or "manual_text2" in st.session_state or "bulk_pairs" in st.session_state:
-        if st.button("Очистить введённые данные", key="clear_manual_input"):
-            for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
-                st.session_state.pop(k, None)
+if st.session_state.pending_mode:
+    col_warn, col_yes, col_close = st.columns([4, 1, 0.6])
+    with col_warn:
+        st.warning(f"Перейти в режим **{st.session_state.pending_mode}**? Текущие данные будут удалены.")
+    with col_yes:
+        if st.button("✅ Да"):
+            if not st.session_state.pending_confirm:
+                st.session_state.pending_confirm = True
+                st.info("Подтвердить✅")
+            else:
+                st.session_state.mode = st.session_state.pending_mode
+                st.session_state.pending_mode = None
+                st.session_state.pending_confirm = False
+                for k in ["uploaded_file", "manual_input"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
 
 # ======== Общие хелперы для вычислений ========
 def compute_pair_scores(model, pairs: List[Tuple[str, str]], metric: str, batch_size: int):
