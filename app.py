@@ -296,20 +296,6 @@ if mode == "Ручной ввод":
                             st.dataframe(susp_df, use_container_width=True)
                             susp_csv = susp_df.to_csv(index=False).encode('utf-8')
                             st.download_button("Скачать suspicious CSV", data=susp_csv, file_name="suspicious_manual_bulk.csv", mime="text/csv")
-                            if st.button("Сохранить suspicious в историю", key="save_susp_manual"):
-                                rec = {
-                                    "source": "manual_bulk_suspicious",
-                                    "pairs_count": len(susp_df),
-                                    "results": susp_df.to_dict(orient="records"),
-                                    "model_a": model_id,
-                                    "model_b": ab_model_id if enable_ab_test else None,
-                                    "metric": metric_choice,
-                                    "timestamp": pd.Timestamp.now().isoformat(),
-                                    "semantic_threshold": semantic_threshold,
-                                    "lexical_threshold": lexical_threshold
-                                }
-                                add_to_history(rec)
-                                st.success("Сохранено в истории.")
 
 # ======= Блок: Бенчмаркинг (STS) =======
 if mode == "Бенчмаркинг (STS)":
