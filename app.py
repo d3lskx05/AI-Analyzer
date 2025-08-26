@@ -117,52 +117,26 @@ def add_suggestions(phrases: List[str]):
     #else:
         #st.sidebar.warning("История пустая")
 
-# ======== Режим: выбор ввода (твоя логика подтверждения сохранена) ========
+# ======== Режим: выбор ввода (упрощённый, с очисткой ручного ввода) ========
 if "mode" not in st.session_state:
     st.session_state.mode = "Файл (CSV/XLSX/JSON)"
-if "pending_mode" not in st.session_state:
-    st.session_state.pending_mode = None
-if "pending_confirm" not in st.session_state:
-    st.session_state.pending_confirm = False
-if "mode_ui_v" not in st.session_state:
-    st.session_state.mode_ui_v = 0
 
-radio_key = f"mode_selector_{st.session_state.mode}_{st.session_state.mode_ui_v}"
 mode_choice = st.radio(
     "Режим проверки",
     ["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"],
-    index=0 if st.session_state.mode == "Файл (CSV/XLSX/JSON)" else (1 if st.session_state.mode=="Ручной ввод" else 2),
-    horizontal=True,
-    key=radio_key
+    index=0 if st.session_state.mode == "Файл (CSV/XLSX/JSON)" else (1 if st.session_state.mode == "Ручной ввод" else 2),
+    horizontal=True
 )
-if st.session_state.pending_mode is None and mode_choice != st.session_state.mode:
-    st.session_state.pending_mode = mode_choice
-    st.session_state.pending_confirm = False
 
-if st.session_state.pending_mode:
-    col_warn, col_yes, col_close = st.columns([4, 1, 0.6])
-    with col_warn:
-        st.warning(
-            f"Перейти в режим **{st.session_state.pending_mode}**? "
-            "Текущие данные будут удалены."
-        )
-    with col_yes:
-        if st.button("✅ Да"):
-            if not st.session_state.pending_confirm:
-                st.session_state.pending_confirm = True
-                st.info("Подтвердить✅")
-            else:
-                st.session_state.mode = st.session_state.pending_mode
-                st.session_state.pending_mode = None
-                st.session_state.pending_confirm = False
-                for k in ["uploaded_file", "manual_input"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
-    with col_close:
-        if st.button("❌", help="Отмена"):
-            st.session_state.pending_mode = None
-            st.session_state.pending_confirm = False
-            st.session_state.mode_ui_v += 1
+# Переключение режима
+if mode_choice != st.session_state.mode:
+    # Если уход с ручного ввода → очищаем поля
+    if st.session_state.mode == "Ручной ввод":
+        for k in ["manual_text1", "manual_text2", "bulk_pairs"]:
+            if k in st.session_state:
+                st.session_state.pop(k)
+    st.session_state.mode = mode_choice
+    st.rerun()  # перестраиваем интерфейс
 
 mode = st.session_state.mode
 
