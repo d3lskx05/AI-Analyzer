@@ -86,19 +86,19 @@ if enable_ab_test and ab_model_id.strip():
         st.sidebar.error(f"Не удалось загрузить модель B: {e}")
         st.stop()
 
-# ======== История ========
-if "history" not in st.session_state:
-    st.session_state["history"] = []
+# ======== История - Отключил ========
+#if "history" not in st.session_state:
+    #st.session_state["history"] = []
 if "suggestions" not in st.session_state:
     st.session_state["suggestions"] = []
 if "experiments" not in st.session_state:
     st.session_state["experiments"] = []  # reproducibility: сохранённые запуски
 
-def add_to_history(record: dict):
-    st.session_state["history"].append(record)
+#Добавить в Историю - - - def add_to_history(record: dict):#
+    #st.session_state["history"].append(record)
 
-def clear_history():
-    st.session_state["history"] = []
+#Очистить историю - - --  def clear_history():
+    #st.session_state["history"] = []
 
 def add_suggestions(phrases: List[str]):
     s = [p for p in phrases if p and isinstance(p, str)]
@@ -106,22 +106,46 @@ def add_suggestions(phrases: List[str]):
         if p not in st.session_state["suggestions"]:
             st.session_state["suggestions"].insert(0, p)
     st.session_state["suggestions"] = st.session_state["suggestions"][:200]
+#БЛОК Истории - Отключен из-за ненадобности
+#st.sidebar.header("История проверок")
+#if st.sidebar.button("Очистить историю"):
+    #clear_history()
+#if st.sidebar.button("Скачать историю в JSON"):
+    #if st.session_state["history"]:
+        #history_bytes = json.dumps(st.session_state["history"], indent=2, ensure_ascii=False).encode('utf-8')
+        #st.sidebar.download_button("Скачать JSON", data=history_bytes, file_name="history.json", mime="application/json")
+    #else:
+        #st.sidebar.warning("История пустая")
 
-st.sidebar.header("История проверок")
-if st.sidebar.button("Очистить историю"):
-    clear_history()
-if st.sidebar.button("Скачать историю в JSON"):
-    if st.session_state["history"]:
-        history_bytes = json.dumps(st.session_state["history"], indent=2, ensure_ascii=False).encode('utf-8')
-        st.sidebar.download_button("Скачать JSON", data=history_bytes, file_name="history.json", mime="application/json")
-    else:
-        st.sidebar.warning("История пустая")
+# ======== Режим: выбор ввода (твоя логика подтверждения сохранена) ========
+if "mode" not in st.session_state:
+    st.session_state.mode = "Файл (CSV/XLSX/JSON)"
+if "pending_mode" not in st.session_state:
+    st.session_state.pending_mode = None
+if "pending_confirm" not in st.session_state:
+    st.session_state.pending_confirm = False
+if "mode_ui_v" not in st.session_state:
+    st.session_state.mode_ui_v = 0
 
-# ======== Режим: выбор ввода (без сброса и с расширенными функциями) ========
+radio_key = f"mode_selector_{st.session_state.mode}_{st.session_state.mode_ui_v}"
+mode_choice = st.radio(
+    "Режим проверки",
+    ["Файл (CSV/XLSX/JSON)", "Ручной ввод", "Бенчмаркинг (STS)"],
+    index=0 if st.session_state.mode == "Файл (CSV/XLSX/JSON)" else (1 if st.session_state.mode=="Ручной ввод" else 2),
+    horizontal=True,
+    key=radio_key
+)
+if st.session_state.pending_mode is None and mode_choice != st.session_state.mode:
+    st.session_state.pending_mode = mode_choice
+    st.session_state.pending_confirm = False
+
 if st.session_state.pending_mode:
     col_warn, col_yes, col_close = st.columns([4, 1, 0.6])
     with col_warn:
-        st.warning(f"Перейти в режим **{st.session_state.pending_mode}**? Текущие данные будут удалены.")
+        st.warning(
+            f"Перейти в режим **{st.session_state.pending_mode}**? "
+            "Текущие данные будут удалены."
+        )
     with col_yes:
         if st.button("✅ Да"):
             if not st.session_state.pending_confirm:
@@ -134,6 +158,13 @@ if st.session_state.pending_mode:
                 for k in ["uploaded_file", "manual_input"]:
                     st.session_state.pop(k, None)
                 st.rerun()
+    with col_close:
+        if st.button("❌", help="Отмена"):
+            st.session_state.pending_mode = None
+            st.session_state.pending_confirm = False
+            st.session_state.mode_ui_v += 1
+
+mode = st.session_state.mode
 
 # ======== Общие хелперы для вычислений ========
 def compute_pair_scores(model, pairs: List[Tuple[str, str]], metric: str, batch_size: int):
@@ -200,22 +231,6 @@ if mode == "Ручной ввод":
                 else:
                     col3.write("")
 
-                if st.button("Сохранить результат в историю", key="save_manual_single"):
-                    rec = {
-                        "source": "manual_single",
-                        "pair": {"phrase_1": t1, "phrase_2": t2},
-                        "score": score_a,
-                        "metric": metric_choice,
-                        "score_b": float(score_b) if (model_b is not None) else None,
-                        "lexical_score": lex,
-                        "is_suspicious": is_suspicious_single,
-                        "model_a": model_id,
-                        "model_b": ab_model_id if enable_ab_test else None,
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    add_to_history(rec)
-                    st.success("Сохранено в истории.")
-
     with st.expander("Ввести несколько пар (каждая пара на новой строке). Формат: `фраза1 || фраза2` / TAB / `,`"):
         bulk_text = st.text_area("Вставьте пары (по одной в строке)", height=180, key="bulk_pairs")
         st.caption("Если разделитель встречается в тексте — используйте `||`.")
@@ -281,20 +296,6 @@ if mode == "Ручной ввод":
                             st.dataframe(susp_df, use_container_width=True)
                             susp_csv = susp_df.to_csv(index=False).encode('utf-8')
                             st.download_button("Скачать suspicious CSV", data=susp_csv, file_name="suspicious_manual_bulk.csv", mime="text/csv")
-                            if st.button("Сохранить suspicious в историю", key="save_susp_manual"):
-                                rec = {
-                                    "source": "manual_bulk_suspicious",
-                                    "pairs_count": len(susp_df),
-                                    "results": susp_df.to_dict(orient="records"),
-                                    "model_a": model_id,
-                                    "model_b": ab_model_id if enable_ab_test else None,
-                                    "metric": metric_choice,
-                                    "timestamp": pd.Timestamp.now().isoformat(),
-                                    "semantic_threshold": semantic_threshold,
-                                    "lexical_threshold": lexical_threshold
-                                }
-                                add_to_history(rec)
-                                st.success("Сохранено в истории.")
 
 # ======= Блок: Бенчмаркинг (STS) =======
 if mode == "Бенчмаркинг (STS)":
