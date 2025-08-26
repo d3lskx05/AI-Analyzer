@@ -1,1 +1,8 @@
-
+streamlit
+pandas
+numpy
+matplotlib
+scikit-learn
+sentence-transformers
+umap-learn
+nltk
