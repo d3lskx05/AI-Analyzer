@@ -8,3 +8,4 @@ pandas
 numpy
 nltk
 openpyxl
+reportlab
