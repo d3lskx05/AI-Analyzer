@@ -94,11 +94,11 @@ if "suggestions" not in st.session_state:
 if "experiments" not in st.session_state:
     st.session_state["experiments"] = []  # reproducibility: сохранённые запуски
 
-def add_to_history(record: dict):
-    st.session_state["history"].append(record)
+#Добавить в Историю - - - def add_to_history(record: dict):#
+    #st.session_state["history"].append(record)
 
-def clear_history():
-    st.session_state["history"] = []
+#Очистить историю - - --  def clear_history():
+    #st.session_state["history"] = []
 
 def add_suggestions(phrases: List[str]):
     s = [p for p in phrases if p and isinstance(p, str)]
@@ -106,16 +106,16 @@ def add_suggestions(phrases: List[str]):
         if p not in st.session_state["suggestions"]:
             st.session_state["suggestions"].insert(0, p)
     st.session_state["suggestions"] = st.session_state["suggestions"][:200]
-
-st.sidebar.header("История проверок")
-if st.sidebar.button("Очистить историю"):
-    clear_history()
-if st.sidebar.button("Скачать историю в JSON"):
-    if st.session_state["history"]:
-        history_bytes = json.dumps(st.session_state["history"], indent=2, ensure_ascii=False).encode('utf-8')
-        st.sidebar.download_button("Скачать JSON", data=history_bytes, file_name="history.json", mime="application/json")
-    else:
-        st.sidebar.warning("История пустая")
+#БЛОК Истории - Отключен из-за ненадобности
+#st.sidebar.header("История проверок")
+#if st.sidebar.button("Очистить историю"):
+    #clear_history()
+#if st.sidebar.button("Скачать историю в JSON"):
+    #if st.session_state["history"]:
+        #history_bytes = json.dumps(st.session_state["history"], indent=2, ensure_ascii=False).encode('utf-8')
+        #st.sidebar.download_button("Скачать JSON", data=history_bytes, file_name="history.json", mime="application/json")
+    #else:
+        #st.sidebar.warning("История пустая")
 
 # ======== Режим: выбор ввода (твоя логика подтверждения сохранена) ========
 if "mode" not in st.session_state:
