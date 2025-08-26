@@ -89,10 +89,10 @@ if enable_ab_test and ab_model_id.strip():
 # ======== История - Отключил ========
 #if "history" not in st.session_state:
     #st.session_state["history"] = []
-#if "suggestions" not in st.session_state:
-    #st.session_state["suggestions"] = []
-#if "experiments" not in st.session_state:
-    #st.session_state["experiments"] = []  # reproducibility: сохранённые запуски
+if "suggestions" not in st.session_state:
+    st.session_state["suggestions"] = []
+if "experiments" not in st.session_state:
+    st.session_state["experiments"] = []  # reproducibility: сохранённые запуски
 
 #Добавить в Историю - - - def add_to_history(record: dict):#
     #st.session_state["history"].append(record)
