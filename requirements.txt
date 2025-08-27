@@ -10,3 +10,8 @@ nltk
 openpyxl
 reportlab
 gdown
+psutil
+plotly
+requests
+torch
+transformers
