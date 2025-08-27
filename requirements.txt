@@ -9,3 +9,4 @@ numpy
 nltk
 openpyxl
 reportlab
+gdown
