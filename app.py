@@ -841,8 +841,6 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # Итоги и таблицы (твоя логика сохранена)
     with st.expander("📊 3. Результаты и выгрузка", expanded=False):
-        result_csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Скачать результаты CSV", data=result_csv, file_name="results.csv", mime="text/csv")
         styled_df = style_suspicious_and_low(df, semantic_threshold, lexical_threshold, low_score_threshold)
         st.dataframe(styled_df, use_container_width=True)
 
