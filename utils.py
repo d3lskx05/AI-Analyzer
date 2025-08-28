@@ -242,8 +242,8 @@ def download_file_from_gdrive(file_id: str) -> str:
             pass
     return model_dir
 
-# NB: кэширование должно делаться на стороне Streamlit (st.cache_resource),
-# здесь оставляем "чистую" функцию.
+# NB: кэширование должно делиться на стороне Streamlit (st.cache_resource),
+# здесь оставляем \"чистую\" функцию.
 def _load_model_from_source(source: str, identifier: str) -> SentenceTransformer:
     if source == "huggingface":
         model_path = identifier
@@ -317,20 +317,28 @@ def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors:
 # ============== Метрики ранжирования ==============
 
 def compute_mrr(ranked: List[int], relevant: set) -> float:
-    """Mean Reciprocal Rank для одного запроса"""
+    """
+    Mean Reciprocal Rank для одного запроса.
+    ranked: список индексов в порядке релевантности (самые релевантные первыми).
+    relevant: set индексов релевантных документов.
+    """
     for i, idx in enumerate(ranked, start=1):
         if idx in relevant:
             return 1.0 / i
     return 0.0
 
 def compute_recall_at_k(ranked: List[int], relevant: set, k: int) -> float:
-    """Recall@k для одного запроса"""
+    """
+    Recall@k для одного запроса.
+    """
     if not relevant:
         return 0.0
     return len([i for i in ranked[:k] if i in relevant]) / len(relevant)
 
 def compute_ndcg_at_k(ranked: List[int], relevant: set, k: int) -> float:
-    """Normalized Discounted Cumulative Gain @k"""
+    """
+    nDCG@k (предполагаем бинарную релевантность — 1 если релевантен, 0 иначе).
+    """
     dcg = 0.0
     for i, idx in enumerate(ranked[:k], start=1):
         if idx in relevant:
@@ -340,9 +348,10 @@ def compute_ndcg_at_k(ranked: List[int], relevant: set, k: int) -> float:
 
 def evaluate_ranking_metrics(neighbors: Dict[int, List[int]], relevance: Dict[int, set], k_values: List[int]) -> pd.DataFrame:
     """
-    Вычисляет метрики ранжирования для всех запросов.
-    neighbors: {query_id -> [список индексов соседей в порядке ранжирования]}
-    relevance: {query_id -> set индексов релевантных элементов}
+    Вычисляет метрики ранжирования для набора запросов.
+    neighbors: {query_id -> [индексы соседей в порядке ранжирования]}
+    relevance: {query_id -> set(индексы релевантных доков)}
+    k_values: список k для Recall@k/nDCG@k
     """
     rows = []
     for qid, ranked in neighbors.items():
@@ -373,10 +382,9 @@ def project_embeddings(embeddings: np.ndarray, method: str = "pca", n_components
     else:
         return None
 
-# ============== Новые функции: бенчмаркинг ==============
+# ============== Новые функции: бенчмаркинг STS ==============
 
 def _load_builtin_sts_sample(lang: str = "en") -> pd.DataFrame:
-    """Очень маленький встроенный STS-семпл на случай отсутствия datasets."""
     data = [
         ("A man is playing guitar", "A person plays the guitar", 4.2),
         ("A man is playing guitar", "A child is playing soccer", 0.8),
@@ -387,13 +395,6 @@ def _load_builtin_sts_sample(lang: str = "en") -> pd.DataFrame:
     return pd.DataFrame(data, columns=["sentence1", "sentence2", "score"])
 
 def load_sts_dataset(name: str = "stsb_multi_mt", lang: str = "en") -> pd.DataFrame:
-    """
-    Загружает STS-датасет через HuggingFace datasets (если доступно),
-    иначе — возвращает маленький встроенный семпл.
-    name варианты:
-      - "stsb_multi_mt" (поддерживает много языков)
-      - "stsb" (англ. GLUE STS-B)
-    """
     if load_dataset is None:
         return _load_builtin_sts_sample(lang)
     try:
@@ -401,7 +402,6 @@ def load_sts_dataset(name: str = "stsb_multi_mt", lang: str = "en") -> pd.DataFr
             ds = load_dataset("glue", "stsb")
             df = pd.DataFrame(ds["validation"])
             df = df.rename(columns={"sentence1": "sentence1", "sentence2": "sentence2", "label": "score"})
-            # GLUE метка в [0..5]? В GLUE STS-B лейбл [0..5], иногда делят на 5 для [0..1]
             return df[["sentence1", "sentence2", "score"]]
         else:
             ds = load_dataset("stsb_multi_mt", name=lang)
@@ -411,10 +411,6 @@ def load_sts_dataset(name: str = "stsb_multi_mt", lang: str = "en") -> pd.DataFr
         return _load_builtin_sts_sample(lang)
 
 def evaluate_sts(model: SentenceTransformer, df: pd.DataFrame, metric: str = "cosine", batch_size: int = 64) -> Dict[str, Any]:
-    """
-    Считает Spearman / Pearson корреляцию предсказанных сходств с человеческими оценками (score).
-    Возвращает также preds и дополнительные поля.
-    """
     s1 = df["sentence1"].map(preprocess_text).tolist()
     s2 = df["sentence2"].map(preprocess_text).tolist()
     y = df["score"].astype(float).to_numpy()
@@ -427,13 +423,10 @@ def evaluate_sts(model: SentenceTransformer, df: pd.DataFrame, metric: str = "co
         preds.append(pair_score(emb1[i], emb2[i], metric=metric))
     preds = np.array(preds, dtype=float)
 
-    # Нормализация для корреляции: если метрика distance (мы вернули отрицательные),
-    # можно умножить на -1, чтобы корреляция интерпретировалась одинаково
     if metric.lower() in {"euclidean", "manhattan"}:
         preds = -preds
 
     res = {"metric": metric, "n": len(df), "preds": preds, "labels": y}
-    # Корреляции
     if spearmanr is not None:
         sp = spearmanr(preds, y).correlation
         res["spearman"] = float(sp) if sp is not None else None
@@ -466,38 +459,27 @@ def _wordnet_synonyms(word: str) -> List[str]:
     return list(out)
 
 def generate_robust_variants(text: str, max_per_word: int = 2) -> List[str]:
-    """
-    Генерирует простые варианты фразы:
-      - синонимизация (если доступен WordNet, англ.)
-      - отрицания (вставка/удаление "не")
-      - подмена чисел
-      - перестановка пары соседних слов
-    """
     t = preprocess_text(text)
     toks = t.split()
     variants = set()
 
-    # перестановки соседних слов (ограничим до 2 позиций)
     for i in range(min(len(toks) - 1, 2)):
         tmp = toks.copy()
         tmp[i], tmp[i+1] = tmp[i+1], tmp[i]
         variants.add(" ".join(tmp))
 
-    # отрицания: если есть "не" -> убрать; иначе добавить перед глаголом/первым словом
     if any(tok == "не" for tok in toks):
         variants.add(" ".join([tok for tok in toks if tok != "не"]))
     else:
         if toks:
             variants.add("не " + " ".join(toks))
 
-    # числа: заменим первые встретившиеся цифры (+1)
     def bump_numbers(s: str) -> str:
         return re.sub(r"\d+", lambda m: str(int(m.group(0)) + 1), s)
     if re.search(r"\d+", t):
         variants.add(bump_numbers(t))
 
-    # синонимизация (простая, англ. через WordNet)
-    for i, w in enumerate(toks[:5]):  # ограничим до первых 5 слов
+    for i, w in enumerate(toks[:5]):
         syns = _wordnet_synonyms(w)[:max_per_word]
         for s in syns:
             tmp = toks.copy()
@@ -507,10 +489,6 @@ def generate_robust_variants(text: str, max_per_word: int = 2) -> List[str]:
     return [v for v in variants if v and v != t]
 
 def robustness_probe(model: SentenceTransformer, pairs: List[Tuple[str, str]], metric: str = "cosine", batch_size: int = 64) -> pd.DataFrame:
-    """
-    Для каждой пары генерирует вариации первой фразы и проверяет изменение score.
-    Возвращает таблицу с delta.
-    """
     rows = []
     for (a, b) in pairs:
         base_a = preprocess_text(a); base_b = preprocess_text(b)
@@ -534,24 +512,16 @@ def robustness_probe(model: SentenceTransformer, pairs: List[Tuple[str, str]], m
 
 def find_suspicious(df: pd.DataFrame,
                     score_col: str = "score",
-                    lexical_col: str = "lexical_score",
+                    lexical_col: Optional[str] = "lexical_score",
                     label_col: Optional[str] = None,
                     semantic_threshold: float = 0.80,
                     lexical_threshold: float = 0.30,
                     low_score_threshold: float = 0.75) -> Dict[str, pd.DataFrame]:
-    """
-    Возвращает dict с DataFrame-ами:
-      - high_sem_low_lex
-      - label_mismatch_positives (label==1 & score<low_score)
-      - label_mismatch_negatives (label==0 & score>=semantic_threshold)
-    """
     out: Dict[str, pd.DataFrame] = {}
     if score_col not in df.columns:
         return out
-    # high-sem / low-lex
-    if lexical_col in df.columns:
+    if lexical_col and lexical_col in df.columns:
         out["high_sem_low_lex"] = df[(df[score_col] >= semantic_threshold) & (df[lexical_col] <= lexical_threshold)].copy()
-    # label mismatches
     if label_col and label_col in df.columns:
         out["label_mismatch_positives"] = df[(df[label_col] == 1) & (df[score_col] < low_score_threshold)].copy()
         out["label_mismatch_negatives"] = df[(df[label_col] == 0) & (df[score_col] >= semantic_threshold)].copy()
@@ -580,10 +550,6 @@ def _save_scatter(x: np.ndarray, y: np.ndarray, xlabel: str, ylabel: str, title:
     plt.close()
 
 def export_pdf_report(report_json: Dict[str, Any], charts: Dict[str, str], output_path: str) -> Optional[str]:
-    """
-    report_json — словарь с ключевыми метриками/сводкой
-    charts — словарь {имя: путь_к_png}, которые будут вставлены
-    """
     if pdf_canvas is None or A4 is None or ImageReader is None:
         return None
     c = pdf_canvas.Canvas(output_path, pagesize=A4)
