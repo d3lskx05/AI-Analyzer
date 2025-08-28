@@ -840,25 +840,25 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.info("Экспериментов пока нет.")
 
         # Итоги и таблицы (твоя логика сохранена)
-    with st.expander("📊 3. Результаты и выгрузка", expanded=False):
+with st.expander("📊 3. Результаты и выгрузка", expanded=False):
     # проверяем, существует ли df в st.session_state
-        if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty:
-            df = st.session_state.df  # достаём датафрейм
+    if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty:
+        df = st.session_state.df  # достаём датафрейм
 
-            result_csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Скачать результаты CSV",
-                data=result_csv,
-                file_name="results.csv",
-                mime="text/csv"
-            )
+        result_csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Скачать результаты CSV",
+            data=result_csv,
+            file_name="results.csv",
+            mime="text/csv"
+        )
 
-            styled_df = style_suspicious_and_low(
-                df, semantic_threshold, lexical_threshold, low_score_threshold
-            )
-            st.dataframe(styled_df, use_container_width=True)
-        else:
-            st.info("Нет данных для отображения или выгрузки")
+        styled_df = style_suspicious_and_low(
+            df, semantic_threshold, lexical_threshold, low_score_threshold
+        )
+        st.dataframe(styled_df, use_container_width=True)
+    else:
+        st.info("Нет данных для отображения или выгрузки")
 
         # Suspicious блок (расширено с учётом label)
     if enable_detector:
