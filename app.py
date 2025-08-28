@@ -425,7 +425,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # ===== Новые вкладки аналитики сверху =====
         st.subheader("2. Аналитика")
-        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Ранжирование", "Robustness", "Экспорт", "Reproducibility"])
+        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Robustness", "Экспорт", "Reproducibility"])
 
         # = Svodka =
         with tabs[0]:
