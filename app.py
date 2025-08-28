@@ -441,7 +441,18 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # ===== Новые вкладки аналитики сверху =====
         st.subheader("2. Аналитика")
-        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Robustness", "Экспорт", "Reproducibility"])
+        tabs = st.tabs([
+    "Сводка", 
+    "Разведка (Explore)", 
+    "Срезы (Slices)", 
+    "A/B тест", 
+    "Визуализация (PCA/UMAP)", 
+    "Top-N соседи", 
+    "Ранжирование",  # <-- новая вкладка
+    "Robustness", 
+    "Экспорт", 
+    "Reproducibility"
+])
 
         # = Svodka =
         with tabs[0]:
@@ -628,6 +639,53 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 nb_csv = nb_df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇️ Скачать соседей (CSV)", data=nb_csv, file_name="neighbors.csv", mime="text/csv")
 
+	# = Ранжирование (экспериментальный блок) =
+with tabs[6]:
+    st.markdown("### Ранжирование моделей (эксперимент)")
+    st.caption("Эта вкладка предназначена для будущего функционала. Пока можно закомментировать.")
+
+    # Заглушка: пример интерфейса
+    dataset_choice = st.selectbox("Выберите тестовый датасет", ["MS MARCO (stub)", "Custom"], index=0)
+    top_k = st.slider("k для Recall/nDCG", 1, 50, 10)
+
+    if st.button("Смоделировать расчёт метрик"):
+        # Заглушка для теста
+        st.info(f"Здесь будут вычисляться MRR, Recall@{top_k}, nDCG@{top_k} на {dataset_choice}.")
+        st.write("Можно будет подключить HuggingFace datasets для загрузки MS MARCO.")
+	# ===== Метрики ранжирования =====
+        if "label" in df.columns:
+            st.markdown("### Метрики ранжирования (MRR, Recall@k, nDCG@k)")
+            if st.button("Вычислить метрики по топ-N"):
+                # Строим словарь neighbors: {индекс -> список индексов соседей}
+                phrase_to_idx = {p: idx for idx, p in enumerate(phrases_all)}
+                neighbors_dict = {}
+                for i, p in enumerate(phrases_all):
+                    ranked = [int(j) for j in idxs[i] if int(j) != i]
+                    neighbors_dict[i] = ranked
+
+                # Строим словарь релевантных: {индекс -> set индексов релевантов}
+                relevance_dict = {}
+                for _, row in df.iterrows():
+                    if "label" in row and row["label"] == 1:
+                        qid = phrase_to_idx.get(row["phrase_1"])
+                        rel = phrase_to_idx.get(row["phrase_2"])
+                        if qid is not None and rel is not None:
+                            relevance_dict.setdefault(qid, set()).add(rel)
+
+                k_values = [1, 3, 5, 10]
+                metrics_df = evaluate_ranking_metrics(neighbors_dict, relevance_dict, k_values)
+
+                st.subheader("Сводка по метрикам")
+                avg_row = metrics_df.drop(columns=["query_id"]).mean().to_dict()
+                st.json(avg_row)
+
+                st.subheader("Детали по каждому запросу")
+                st.dataframe(metrics_df, use_container_width=True)
+
+                csv_metrics = metrics_df.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇️ Скачать метрики (CSV)", data=csv_metrics, file_name="ranking_metrics.csv", mime="text/csv")
+        else:
+            st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
         # = Robustness =
         with tabs[6]:
             st.markdown("#### Robustness / устойчивость")
