@@ -22,7 +22,9 @@ from utils import (
     build_neighbors, project_embeddings,
     load_sts_dataset, evaluate_sts,
     robustness_probe, find_suspicious,
-    _save_plot_hist, _save_scatter, export_pdf_report
+    _save_plot_hist, _save_scatter, export_pdf_report,
+    # Метрики ранжирования
+    compute_mrr, compute_recall_at_k, compute_ndcg_at_k, evaluate_ranking_metrics
 )
 
 # ============== Конфиг страницы ==============
@@ -87,18 +89,10 @@ if enable_ab_test and ab_model_id.strip():
         st.stop()
 
 # ======== История - Отключил ========
-#if "history" not in st.session_state:
-    #st.session_state["history"] = []
 if "suggestions" not in st.session_state:
     st.session_state["suggestions"] = []
 if "experiments" not in st.session_state:
     st.session_state["experiments"] = []  # reproducibility: сохранённые запуски
-
-#Добавить в Историю - - - def add_to_history(record: dict):#
-    #st.session_state["history"].append(record)
-
-#Очистить историю - - --  def clear_history():
-    #st.session_state["history"] = []
 
 def add_suggestions(phrases: List[str]):
     s = [p for p in phrases if p and isinstance(p, str)]
@@ -106,18 +100,8 @@ def add_suggestions(phrases: List[str]):
         if p not in st.session_state["suggestions"]:
             st.session_state["suggestions"].insert(0, p)
     st.session_state["suggestions"] = st.session_state["suggestions"][:200]
-#БЛОК Истории - Отключен из-за ненадобности
-#st.sidebar.header("История проверок")
-#if st.sidebar.button("Очистить историю"):
-    #clear_history()
-#if st.sidebar.button("Скачать историю в JSON"):
-    #if st.session_state["history"]:
-        #history_bytes = json.dumps(st.session_state["history"], indent=2, ensure_ascii=False).encode('utf-8')
-        #st.sidebar.download_button("Скачать JSON", data=history_bytes, file_name="history.json", mime="application/json")
-    #else:
-        #st.sidebar.warning("История пустая")
 
-# ======== Режим: выбор ввода (твоя логика подтверждения сохранена) ========
+# ======== Режим: выбор ввода ========
 if "mode" not in st.session_state:
     st.session_state.mode = "Файл (CSV/XLSX/JSON)"
 if "pending_mode" not in st.session_state:
@@ -441,18 +425,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # ===== Новые вкладки аналитики сверху =====
         st.subheader("2. Аналитика")
-        tabs = st.tabs([
-    "Сводка", 
-    "Разведка (Explore)", 
-    "Срезы (Slices)", 
-    "A/B тест", 
-    "Визуализация (PCA/UMAP)", 
-    "Top-N соседи", 
-    "Ранжирование",  # <-- новая вкладка
-    "Robustness", 
-    "Экспорт", 
-    "Reproducibility"
-])
+        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Robustness", "Экспорт", "Reproducibility"])
 
         # = Svodka =
         with tabs[0]:
@@ -639,53 +612,41 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 nb_csv = nb_df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇️ Скачать соседей (CSV)", data=nb_csv, file_name="neighbors.csv", mime="text/csv")
 
-	# = Ранжирование (экспериментальный блок) =
-with tabs[6]:
-    st.markdown("### Ранжирование моделей (эксперимент)")
-    st.caption("Эта вкладка предназначена для будущего функционала. Пока можно закомментировать.")
+                # ===== Метрики ранжирования =====
+                if "label" in df.columns:
+                    st.markdown("### Метрики ранжирования (MRR, Recall@k, nDCG@k)")
+                    if st.button("Вычислить метрики по топ-N"):
+                        # Строим словарь neighbors: {индекс -> список индексов соседей}
+                        phrase_to_idx = {p: idx for idx, p in enumerate(phrases_all)}
+                        neighbors_dict = {}
+                        for i, p in enumerate(phrases_all):
+                            ranked = [int(j) for j in idxs[i] if int(j) != i]
+                            neighbors_dict[i] = ranked
 
-    # Заглушка: пример интерфейса
-    dataset_choice = st.selectbox("Выберите тестовый датасет", ["MS MARCO (stub)", "Custom"], index=0)
-    top_k = st.slider("k для Recall/nDCG", 1, 50, 10)
+                        # Строим словарь релевантных: {индекс -> set индексов релевантов}
+                        relevance_dict = {}
+                        for _, row in df.iterrows():
+                            if "label" in row and row["label"] == 1:
+                                qid = phrase_to_idx.get(row["phrase_1"])
+                                rel = phrase_to_idx.get(row["phrase_2"])
+                                if qid is not None and rel is not None:
+                                    relevance_dict.setdefault(qid, set()).add(rel)
 
-    if st.button("Смоделировать расчёт метрик"):
-        # Заглушка для теста
-        st.info(f"Здесь будут вычисляться MRR, Recall@{top_k}, nDCG@{top_k} на {dataset_choice}.")
-        st.write("Можно будет подключить HuggingFace datasets для загрузки MS MARCO.")
-	# ===== Метрики ранжирования =====
-        if "label" in df.columns:
-            st.markdown("### Метрики ранжирования (MRR, Recall@k, nDCG@k)")
-            if st.button("Вычислить метрики по топ-N"):
-                # Строим словарь neighbors: {индекс -> список индексов соседей}
-                phrase_to_idx = {p: idx for idx, p in enumerate(phrases_all)}
-                neighbors_dict = {}
-                for i, p in enumerate(phrases_all):
-                    ranked = [int(j) for j in idxs[i] if int(j) != i]
-                    neighbors_dict[i] = ranked
+                        k_values = [1, 3, 5, 10]
+                        metrics_df = evaluate_ranking_metrics(neighbors_dict, relevance_dict, k_values)
 
-                # Строим словарь релевантных: {индекс -> set индексов релевантов}
-                relevance_dict = {}
-                for _, row in df.iterrows():
-                    if "label" in row and row["label"] == 1:
-                        qid = phrase_to_idx.get(row["phrase_1"])
-                        rel = phrase_to_idx.get(row["phrase_2"])
-                        if qid is not None and rel is not None:
-                            relevance_dict.setdefault(qid, set()).add(rel)
+                        st.subheader("Сводка по метрикам")
+                        avg_row = metrics_df.drop(columns=["query_id"]).mean().to_dict()
+                        st.json(avg_row)
 
-                k_values = [1, 3, 5, 10]
-                metrics_df = evaluate_ranking_metrics(neighbors_dict, relevance_dict, k_values)
+                        st.subheader("Детали по каждому запросу")
+                        st.dataframe(metrics_df, use_container_width=True)
 
-                st.subheader("Сводка по метрикам")
-                avg_row = metrics_df.drop(columns=["query_id"]).mean().to_dict()
-                st.json(avg_row)
+                        csv_metrics = metrics_df.to_csv(index=False).encode("utf-8")
+                        st.download_button("⬇️ Скачать метрики (CSV)", data=csv_metrics, file_name="ranking_metrics.csv", mime="text/csv")
+                else:
+                    st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
 
-                st.subheader("Детали по каждому запросу")
-                st.dataframe(metrics_df, use_container_width=True)
-
-                csv_metrics = metrics_df.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Скачать метрики (CSV)", data=csv_metrics, file_name="ranking_metrics.csv", mime="text/csv")
-        else:
-            st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
         # = Robustness =
         with tabs[6]:
             st.markdown("#### Robustness / устойчивость")
@@ -695,7 +656,6 @@ with tabs[6]:
                 with st.spinner("Генерирую варианты и считаю дельты..."):
                     rob_df = robustness_probe(model_a, pairs, metric=metric_choice, batch_size=batch_size)
                 st.dataframe(rob_df, use_container_width=True)
-                # Куда модель разваливается
                 worst = rob_df.sort_values("delta").head(10)
                 st.markdown("**Где модель падает (самые негативные дельты):**")
                 st.dataframe(worst, use_container_width=True)
@@ -734,7 +694,7 @@ with tabs[6]:
                 sc_path = os.path.join(td, "sem_vs_lex.png")
                 _save_scatter(df["lexical_score"].to_numpy(), df["score"].to_numpy(),
                               "Jaccard (lexical)", f"{metric_choice} (semantic)",
-                              "Semantic vs Lexical", sc_path)
+                              "Semantic vs Lex", sc_path)
                 out_pdf = os.path.join(td, "report.pdf")
                 pdf_path = export_pdf_report(report["summary"] | {"file_name": report["file_name"], "model": model_id, "metric": metric_choice},
                                              {"Score histogram": hist_path, "Sem vs Lex": sc_path}, out_pdf)
