@@ -425,7 +425,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # ===== Новые вкладки аналитики сверху =====
         st.subheader("2. Аналитика")
-        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Robustness", "Ранжирование", "Reproducibility", "Экспорт"])
+        tabs = st.tabs(["Сводка", "Разведка (Explore)", "Срезы (Slices)", "A/B тест", "Визуализация (PCA/UMAP)", "Top-N соседи", "Ранжирование", "Robustness", "Экспорт", "Reproducibility"])
 
         # = Svodka =
         with tabs[0]:
@@ -647,93 +647,11 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 else:
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
 
-        # = Robustness =
-        with tabs[6]:
-            st.markdown("#### Robustness / устойчивость")
-            sample_n = st.slider("Сколько пар проверять", 1, min(20, len(df)), min(5, len(df)))
-            pairs = list(zip(df["phrase_1"].tolist()[:sample_n], df["phrase_2"].tolist()[:sample_n]))
-            if st.button("Запустить robustness-проверку"):
-                with st.spinner("Генерирую варианты и считаю дельты..."):
-                    rob_df = robustness_probe(model_a, pairs, metric=metric_choice, batch_size=batch_size)
-                st.dataframe(rob_df, use_container_width=True)
-                worst = rob_df.sort_values("delta").head(10)
-                st.markdown("**Где модель падает (самые негативные дельты):**")
-                st.dataframe(worst, use_container_width=True)
-                csv_bytes = rob_df.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Скачать robustness CSV", data=csv_bytes, file_name="robustness.csv", mime="text/csv")
-
-        # = Export =
-        with tabs[9]:
-            st.markdown("#### Экспорт отчёта (JSON/PDF)")
-            report = {
-                "file_name": uploaded_file.name,
-                "file_hash": file_hash,
-                "n_pairs": int(len(df)),
-                "model_a": model_id,
-                "model_b": ab_model_id if enable_ab_test else None,
-                "metric": metric_choice,
-                "thresholds": {
-                    "semantic_threshold": float(semantic_threshold),
-                    "lexical_threshold": float(lexical_threshold),
-                    "low_score_threshold": float(low_score_threshold)
-                },
-                "summary": {
-                    "mean_score": float(df["score"].mean()),
-                    "median_score": float(df["score"].median()),
-                    "low_count": int((df["score"] < low_score_threshold).sum()),
-                    "suspicious_count": int(((df["score"] >= semantic_threshold) & (df["lexical_score"] <= lexical_threshold)).sum())
-                }
-            }
-            rep_bytes = json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
-            st.download_button("💾 Скачать отчёт JSON", data=rep_bytes, file_name="synonym_checker_report.json", mime="application/json")
-
-            # PDF с графиками
-            with tempfile.TemporaryDirectory() as td:
-                hist_path = os.path.join(td, "score_hist.png")
-                _save_plot_hist(df["score"].to_numpy(), f"{metric_choice} score histogram", hist_path)
-                sc_path = os.path.join(td, "sem_vs_lex.png")
-                _save_scatter(df["lexical_score"].to_numpy(), df["score"].to_numpy(),
-                              "Jaccard (lexical)", f"{metric_choice} (semantic)",
-                              "Semantic vs Lex", sc_path)
-                out_pdf = os.path.join(td, "report.pdf")
-                pdf_path = export_pdf_report(report["summary"] | {"file_name": report["file_name"], "model": model_id, "metric": metric_choice},
-                                             {"Score histogram": hist_path, "Sem vs Lex": sc_path}, out_pdf)
-                if pdf_path and os.path.exists(pdf_path):
-                    with open(pdf_path, "rb") as f:
-                        st.download_button("⬇️ Скачать PDF отчёт", data=f.read(), file_name="report.pdf", mime="application/pdf")
-                else:
-                    st.info("PDF отчёт недоступен (нет reportlab). Установите зависимость, чтобы включить экспорт.")
-
-        # = Reproducibility =
-        with tabs[8]:
-            st.markdown("#### Сохранение/сравнение экспериментов")
-            if st.button("Сохранить текущий запуск как эксперимент"):
-                exp = {
-                    "type": "file_run",
-                    "file": uploaded_file.name,
-                    "file_hash": file_hash,
-                    "model_a": model_id,
-                    "model_b": ab_model_id if enable_ab_test else None,
-                    "metric": metric_choice,
-                    "mean_score": float(df["score"].mean()),
-                    "timestamp": pd.Timestamp.now().isoformat()
-                }
-                st.session_state["experiments"].append(exp)
-                st.success("Эксперимент сохранён в сессии.")
-
-            if st.session_state["experiments"]:
-                st.markdown("**Сохранённые эксперименты**")
-                st.dataframe(pd.DataFrame(st.session_state["experiments"]), use_container_width=True)
-                exp_bytes = json.dumps(st.session_state["experiments"], ensure_ascii=False, indent=2).encode("utf-8")
-                st.download_button("⬇️ Скачать эксперименты (JSON)", data=exp_bytes, file_name="experiments.json", mime="application/json")
-            else:
-                st.info("Экспериментов пока нет.")
-
         # = Ранжирование =
-    with tabs[7]:
-         st.markdown("#### Ранжирование моделей")
+        with tabs[6]:
+            st.markdown(Ранжирование")
 
-    ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
+            ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
 
     if ds_mode == "Custom dataset":
         rank_file = st.file_uploader(
@@ -839,6 +757,89 @@ if mode == "Файл (CSV/XLSX/JSON)":
         if metrics_b is not None:
             metrics_b_csv = metrics_b.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Скачать детальные метрики Model B (CSV)", data=metrics_b_csv, file_name="ranking_metrics_B.csv", mime="text/csv")
+
+                    
+        # = Robustness =
+        with tabs[7]:
+            st.markdown("#### Robustness / устойчивость")
+            sample_n = st.slider("Сколько пар проверять", 1, min(20, len(df)), min(5, len(df)))
+            pairs = list(zip(df["phrase_1"].tolist()[:sample_n], df["phrase_2"].tolist()[:sample_n]))
+            if st.button("Запустить robustness-проверку"):
+                with st.spinner("Генерирую варианты и считаю дельты..."):
+                    rob_df = robustness_probe(model_a, pairs, metric=metric_choice, batch_size=batch_size)
+                st.dataframe(rob_df, use_container_width=True)
+                worst = rob_df.sort_values("delta").head(10)
+                st.markdown("**Где модель падает (самые негативные дельты):**")
+                st.dataframe(worst, use_container_width=True)
+                csv_bytes = rob_df.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇️ Скачать robustness CSV", data=csv_bytes, file_name="robustness.csv", mime="text/csv")
+
+        # = Export =
+        with tabs[8]:
+            st.markdown("#### Экспорт отчёта (JSON/PDF)")
+            report = {
+                "file_name": uploaded_file.name,
+                "file_hash": file_hash,
+                "n_pairs": int(len(df)),
+                "model_a": model_id,
+                "model_b": ab_model_id if enable_ab_test else None,
+                "metric": metric_choice,
+                "thresholds": {
+                    "semantic_threshold": float(semantic_threshold),
+                    "lexical_threshold": float(lexical_threshold),
+                    "low_score_threshold": float(low_score_threshold)
+                },
+                "summary": {
+                    "mean_score": float(df["score"].mean()),
+                    "median_score": float(df["score"].median()),
+                    "low_count": int((df["score"] < low_score_threshold).sum()),
+                    "suspicious_count": int(((df["score"] >= semantic_threshold) & (df["lexical_score"] <= lexical_threshold)).sum())
+                }
+            }
+            rep_bytes = json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
+            st.download_button("💾 Скачать отчёт JSON", data=rep_bytes, file_name="synonym_checker_report.json", mime="application/json")
+
+            # PDF с графиками
+            with tempfile.TemporaryDirectory() as td:
+                hist_path = os.path.join(td, "score_hist.png")
+                _save_plot_hist(df["score"].to_numpy(), f"{metric_choice} score histogram", hist_path)
+                sc_path = os.path.join(td, "sem_vs_lex.png")
+                _save_scatter(df["lexical_score"].to_numpy(), df["score"].to_numpy(),
+                              "Jaccard (lexical)", f"{metric_choice} (semantic)",
+                              "Semantic vs Lex", sc_path)
+                out_pdf = os.path.join(td, "report.pdf")
+                pdf_path = export_pdf_report(report["summary"] | {"file_name": report["file_name"], "model": model_id, "metric": metric_choice},
+                                             {"Score histogram": hist_path, "Sem vs Lex": sc_path}, out_pdf)
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        st.download_button("⬇️ Скачать PDF отчёт", data=f.read(), file_name="report.pdf", mime="application/pdf")
+                else:
+                    st.info("PDF отчёт недоступен (нет reportlab). Установите зависимость, чтобы включить экспорт.")
+
+        # = Reproducibility =
+        with tabs[9]:
+            st.markdown("#### Сохранение/сравнение экспериментов")
+            if st.button("Сохранить текущий запуск как эксперимент"):
+                exp = {
+                    "type": "file_run",
+                    "file": uploaded_file.name,
+                    "file_hash": file_hash,
+                    "model_a": model_id,
+                    "model_b": ab_model_id if enable_ab_test else None,
+                    "metric": metric_choice,
+                    "mean_score": float(df["score"].mean()),
+                    "timestamp": pd.Timestamp.now().isoformat()
+                }
+                st.session_state["experiments"].append(exp)
+                st.success("Эксперимент сохранён в сессии.")
+
+            if st.session_state["experiments"]:
+                st.markdown("**Сохранённые эксперименты**")
+                st.dataframe(pd.DataFrame(st.session_state["experiments"]), use_container_width=True)
+                exp_bytes = json.dumps(st.session_state["experiments"], ensure_ascii=False, indent=2).encode("utf-8")
+                st.download_button("⬇️ Скачать эксперименты (JSON)", data=exp_bytes, file_name="experiments.json", mime="application/json")
+            else:
+                st.info("Экспериментов пока нет.")
 
         # Итоги и таблицы (твоя логика сохранена)
         st.subheader("3. Результаты и выгрузка")
