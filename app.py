@@ -663,7 +663,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.download_button("⬇️ Скачать robustness CSV", data=csv_bytes, file_name="robustness.csv", mime="text/csv")
 
         # = Export =
-        with tabs[7]:
+        with tabs[9]:
             st.markdown("#### Экспорт отчёта (JSON/PDF)")
             report = {
                 "file_name": uploaded_file.name,
@@ -730,7 +730,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.info("Экспериментов пока нет.")
 
         # = Ранжирование =
-    with tabs[9]:
+    with tabs[7]:
          st.markdown("#### Ранжирование моделей")
 
     ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
