@@ -561,51 +561,6 @@ if mode == "Файл (CSV/XLSX/JSON)":
                     delta_df.sort_values("delta", ascending=True).head(10)[["phrase_1","phrase_2","score","score_b","delta"]],
                     use_container_width=True
                 )
-                # --- Метрики ранжирования A vs B ---
-st.markdown("### Метрики ранжирования (MRR, Recall@k, nDCG@k)")
-
-if "label" in df.columns:
-    k_values = [1, 3, 5, 10]
-    phrase_to_idx = {p: idx for idx, p in enumerate(phrases_all)}
-
-    # relevance dict (какие соседи релевантны)
-    relevance_dict = {}
-    for _, row in df.iterrows():
-        if row.get("label") == 1:
-            qid = phrase_to_idx.get(row["phrase_1"])
-            rel = phrase_to_idx.get(row["phrase_2"])
-            if qid is not None and rel is not None:
-                relevance_dict.setdefault(qid, set()).add(rel)
-
-    # --- соседи для Model A ---
-    _, dists_a, idxs_a = build_neighbors(embeddings_a, metric=metric_choice, n_neighbors=10)
-    neighbors_a = {i: [int(j) for j in idxs_a[i] if int(j) != i] for i in range(len(phrases_all))}
-    metrics_a = evaluate_ranking_metrics(neighbors_a, relevance_dict, k_values)
-    avg_a = metrics_a.drop(columns=["query_id"]).mean().rename("Model A")
-
-    # --- соседи для Model B ---
-    metrics_b, avg_b = None, None
-    if embeddings_b is not None:
-        _, dists_b, idxs_b = build_neighbors(embeddings_b, metric=metric_choice, n_neighbors=10)
-        neighbors_b = {i: [int(j) for j in idxs_b[i] if int(j) != i] for i in range(len(phrases_all))}
-        metrics_b = evaluate_ranking_metrics(neighbors_b, relevance_dict, k_values)
-        avg_b = metrics_b.drop(columns=["query_id"]).mean().rename("Model B")
-
-    # --- вывод ---
-    st.subheader("Сводные метрики")
-    if avg_b is not None:
-        comp_df = pd.concat([avg_a, avg_b], axis=1)
-        st.dataframe(comp_df)
-
-        chart_df = comp_df.reset_index().melt(id_vars="index", var_name="model", value_name="score")
-        chart = alt.Chart(chart_df).mark_bar().encode(
-            x="index:N", y="score:Q", color="model:N"
-        )
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.dataframe(avg_a)
-else:
-    st.info("Для метрик ранжирования нужен столбец 'label'.")
 
         # = Визуализация эмбеддингов =
         with tabs[4]:
@@ -691,7 +646,7 @@ else:
                         st.download_button("⬇️ Скачать метрики (CSV)", data=csv_metrics, file_name="ranking_metrics.csv", mime="text/csv")
                 else:
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
-                    # ====== Ранжирование ======
+        # ====== Ранжирование ======
 with st.expander("📊 Ранжирование"):
     st.markdown("### Оценка моделей на задаче ранжирования")
 
