@@ -840,23 +840,49 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.info("Экспериментов пока нет.")
 
         # Итоги и таблицы (твоя логика сохранена)
-    with st.expander("📊 3. Результаты и выгрузка", expanded=False):
-        styled_df = style_suspicious_and_low(df, semantic_threshold, lexical_threshold, low_score_threshold)
+   with st.expander("📊 3. Результаты и выгрузка", expanded=False):
+    if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty:
+        df = st.session_state.df  # достаём датафрейм
+
+        # Кнопка выгрузки всего результата
+        result_csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Скачать результаты CSV",
+            data=result_csv,
+            file_name="results.csv",
+            mime="text/csv"
+        )
+
+        # Основная таблица с подсветкой
+        styled_df = style_suspicious_and_low(
+            df, semantic_threshold, lexical_threshold, low_score_threshold
+        )
         st.dataframe(styled_df, use_container_width=True)
 
         # Suspicious блок (расширено с учётом label)
-    if enable_detector:
-            susp = find_suspicious(df,
-                                   score_col="score",
-                                   lexical_col="lexical_score",
-                                   label_col=("label" if "label" in df.columns else None),
-                                   semantic_threshold=semantic_threshold,
-                                   lexical_threshold=lexical_threshold,
-                                   low_score_threshold=low_score_threshold)
+        if enable_detector:
+            susp = find_suspicious(
+                df,
+                score_col="score",
+                lexical_col="lexical_score",
+                label_col=("label" if "label" in df.columns else None),
+                semantic_threshold=semantic_threshold,
+                lexical_threshold=lexical_threshold,
+                low_score_threshold=low_score_threshold
+            )
             st.markdown("### Подозрительные / аномальные случаи")
             for k, sdf in susp.items():
                 st.markdown(f"**{k}** — {len(sdf)}")
                 if not sdf.empty:
                     st.dataframe(sdf, use_container_width=True)
+
+                    # отдельная кнопка для выгрузки каждой категории
                     s_csv = sdf.to_csv(index=False).encode("utf-8")
-                    st.download_button(f"⬇️ Скачать {k}.csv", data=s_csv, file_name=f"{k}.csv", mime="text/csv")
+                    st.download_button(
+                        f"⬇️ Скачать {k}.csv",
+                        data=s_csv,
+                        file_name=f"{k}.csv",
+                        mime="text/csv"
+                    )
+    else:
+        st.info("Нет данных для отображения или выгрузки")
