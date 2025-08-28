@@ -653,7 +653,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
             ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
 
-    if ds_mode == "Custom dataset":
+        if ds_mode == "Custom dataset":
         rank_file = st.file_uploader(
             "Загрузите файл с колонками: query, candidate, label ИЛИ phrase_1, phrase_2, label",
             type=["csv", "xlsx", "json"]
