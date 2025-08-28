@@ -647,6 +647,117 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 else:
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
 
+                    # = Ранжирование =
+with tabs[4]:
+    st.header("📊 Ранжирование моделей")
+
+    ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
+
+    if ds_mode == "Custom dataset":
+        rank_file = st.file_uploader(
+            "Загрузите файл с колонками: query, candidate, label ИЛИ phrase_1, phrase_2, label",
+            type=["csv", "xlsx", "json"]
+        )
+        if rank_file is not None:
+            df_rank, _ = read_uploaded_file_bytes(rank_file)
+        else:
+            df_rank = None
+    else:
+        # встроенный пример (демо)
+        df_rank = pd.DataFrame([
+            {"query": "what is AI", "candidate": "artificial intelligence", "label": 1},
+            {"query": "what is AI", "candidate": "machine learning", "label": 1},
+            {"query": "what is AI", "candidate": "banana", "label": 0},
+            {"query": "who is the president of USA", "candidate": "Joe Biden", "label": 1},
+            {"query": "who is the president of USA", "candidate": "Barack Obama", "label": 0},
+        ])
+
+    if df_rank is not None:
+        st.write("Размер датасета:", len(df_rank))
+        st.dataframe(df_rank.head(10), use_container_width=True)
+
+        # --- Приводим к единому формату ---
+        if "query" in df_rank.columns and "candidate" in df_rank.columns:
+            queries = df_rank["query"].map(preprocess_text).tolist()
+            candidates = df_rank["candidate"].map(preprocess_text).tolist()
+        elif "phrase_1" in df_rank.columns and "phrase_2" in df_rank.columns:
+            queries = df_rank["phrase_1"].map(preprocess_text).tolist()
+            candidates = df_rank["phrase_2"].map(preprocess_text).tolist()
+        else:
+            st.error("В датасете должны быть колонки (query, candidate, label) или (phrase_1, phrase_2, label).")
+            st.stop()
+
+        if "label" not in df_rank.columns:
+            st.error("В датасете отсутствует колонка 'label'.")
+            st.stop()
+
+        labels = df_rank["label"].astype(int).tolist()
+
+        # --- Энкодинг Model A ---
+        with st.spinner("Энкодинг Model A..."):
+            q_emb_a = encode_texts_in_batches(model_a, queries, batch_size)
+            c_emb_a = encode_texts_in_batches(model_a, candidates, batch_size)
+
+        q_emb_b, c_emb_b = None, None
+        if model_b is not None:
+            with st.spinner("Энкодинг Model B..."):
+                q_emb_b = encode_texts_in_batches(model_b, queries, batch_size)
+                c_emb_b = encode_texts_in_batches(model_b, candidates, batch_size)
+
+        # --- Вычисление метрик ---
+        k_values = [1, 3, 5, 10]
+
+        def build_eval(emb_q, emb_c):
+            neighbors = {}
+            relevance = {}
+            for qid, qe in enumerate(emb_q):
+                sims = [pair_score(qe, ce, metric=metric_choice) for ce in emb_c]
+                ranked = np.argsort(sims)[::-1]  # сортируем от большего к меньшему
+                neighbors[qid] = ranked.tolist()
+                # релевантные кандидаты для этого запроса
+                rels = {i for i, l in enumerate(labels) if l == 1 and queries[i] == queries[qid]}
+                relevance[qid] = rels
+            return evaluate_ranking_metrics(neighbors, relevance, k_values)
+
+        st.markdown("#### Метрики Model A")
+        metrics_a = build_eval(q_emb_a, c_emb_a)
+        st.dataframe(metrics_a, use_container_width=True)
+        avg_a = metrics_a.drop(columns=["query_id"]).mean().rename("Model A")
+
+        metrics_b, avg_b = None, None
+        if q_emb_b is not None and c_emb_b is not None:
+            st.markdown("#### Метрики Model B")
+            metrics_b = build_eval(q_emb_b, c_emb_b)
+            st.dataframe(metrics_b, use_container_width=True)
+            avg_b = metrics_b.drop(columns=["query_id"]).mean().rename("Model B")
+
+        # --- Сравнение ---
+        st.markdown("### Сравнение моделей")
+        if avg_b is not None:
+            comp_df = pd.concat([avg_a, avg_b], axis=1)
+            st.dataframe(comp_df)
+
+            chart_df = comp_df.reset_index().melt(id_vars="index", var_name="model", value_name="score")
+            chart = alt.Chart(chart_df).mark_bar().encode(
+                x="index:N", y="score:Q", color="model:N"
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+            # Экспорт усреднённых метрик
+            avg_csv = comp_df.to_csv().encode("utf-8")
+            st.download_button("⬇️ Скачать усреднённые метрики (CSV)", data=avg_csv, file_name="ranking_summary.csv", mime="text/csv")
+        else:
+            st.dataframe(avg_a)
+            avg_csv = avg_a.to_frame().to_csv().encode("utf-8")
+            st.download_button("⬇️ Скачать усреднённые метрики (CSV)", data=avg_csv, file_name="ranking_summary.csv", mime="text/csv")
+
+        # Экспорт детальных метрик
+        metrics_a_csv = metrics_a.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Скачать детальные метрики Model A (CSV)", data=metrics_a_csv, file_name="ranking_metrics_A.csv", mime="text/csv")
+        if metrics_b is not None:
+            metrics_b_csv = metrics_b.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Скачать детальные метрики Model B (CSV)", data=metrics_b_csv, file_name="ranking_metrics_B.csv", mime="text/csv")
+
         # = Robustness =
         with tabs[6]:
             st.markdown("#### Robustness / устойчивость")
