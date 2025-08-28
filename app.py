@@ -648,7 +648,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
         # = Ранжирование =
         with tabs[6]:
-        st.markdown("#### Ранжирование")
+            st.markdown("#### Ранжирование")
         
         ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
 
