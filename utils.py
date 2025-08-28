@@ -1,5 +1,6 @@
 # utils.py
-# Вспомогательные функции и утилиты для Synonym Checker
+# Вспомогательные функции и утилиты для Synonym Checker (расширенная версия)
+
 from __future__ import annotations
 import io
 import os
@@ -10,7 +11,7 @@ import zipfile
 import shutil
 import hashlib
 import tempfile
-from typing import List, Tuple, Dict, Any, Optional, Set
+from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ import pandas as pd
 # ====== ML / NLP ======
 from sentence_transformers import SentenceTransformer, util
 
-# Метрики/статистика
+# Метрики и статистика
 try:
     from scipy.stats import spearmanr, pearsonr
 except Exception:
@@ -27,10 +28,10 @@ except Exception:
 
 # Визуализация (для PDF)
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # безопасно для headless
 import matplotlib.pyplot as plt
 
-# sklearn (опционально)
+# Вектора, кластеризация, соседство
 try:
     from sklearn.decomposition import PCA
     from sklearn.neighbors import NearestNeighbors
@@ -44,7 +45,7 @@ try:
 except Exception:
     umap = None
 
-# PDF (опционально)
+# PDF отчёты
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
@@ -54,20 +55,20 @@ except Exception:
     ImageReader = None
     pdf_canvas = None
 
-# datasets (опционально)
+# Datasets (опционально)
 try:
     from datasets import load_dataset
 except Exception:
     load_dataset = None
 
-# pymorphy2 (опционально)
+# Морфология (опционально)
 try:
     import pymorphy2   # type: ignore
     _MORPH = pymorphy2.MorphAnalyzer()
 except Exception:
     _MORPH = None
 
-# nltk.wordnet (опционально)
+# NLTK WordNet (опционально)
 try:
     import nltk
     from nltk.corpus import wordnet as wn
@@ -76,7 +77,7 @@ except Exception:
     _NLTK_OK = False
     wn = None
 
-# ============== Утилиты ==============
+# ============== Базовые утилиты (твои, сохранены) ==============
 
 def preprocess_text(t: Any) -> str:
     if pd.isna(t):
@@ -87,6 +88,13 @@ def file_md5(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()
 
 def _try_read_json(raw: bytes) -> pd.DataFrame:
+    """
+    Попытка прочитать JSON/NDJSON в DataFrame.
+    Поддержка:
+      - список объектов
+      - NDJSON
+      - columns-orient dict
+    """
     try:
         obj = json.loads(raw.decode("utf-8"))
         if isinstance(obj, list):
@@ -161,9 +169,9 @@ def simple_style_suspicious_and_low(df, sem_thresh: float, lex_thresh: float, lo
         is_suspicious = (score >= sem_thresh and lex <= lex_thresh)
         for _ in row:
             if is_suspicious:
-                out.append('background-color: #fff2b8')
+                out.append('background-color: #fff2b8')  # жёлтый
             elif is_low_score:
-                out.append('background-color: #ffcccc')
+                out.append('background-color: #ffcccc')  # розовый
             else:
                 out.append('')
         return out
@@ -208,7 +216,7 @@ def bootstrap_diff_ci(a: np.ndarray, b: np.ndarray, n_boot: int = 500, seed: int
     high = float(np.quantile(diffs, 1-(1-ci)/2))
     return mean_diff, low, high
 
-# ============== Model IO ==============
+# ============== Загрузка модели ==============
 
 def download_file_from_gdrive(file_id: str) -> str:
     import gdown
@@ -234,6 +242,8 @@ def download_file_from_gdrive(file_id: str) -> str:
             pass
     return model_dir
 
+# NB: кэширование должно делиться на стороне Streamlit (st.cache_resource),
+# здесь оставляем \"чистую\" функцию.
 def _load_model_from_source(source: str, identifier: str) -> SentenceTransformer:
     if source == "huggingface":
         model_path = identifier
@@ -249,7 +259,7 @@ def encode_texts_in_batches(model: SentenceTransformer, texts: List[str], batch_
     embs = model.encode(texts, batch_size=batch_size, convert_to_numpy=True, show_progress_bar=False)
     return np.asarray(embs)
 
-# ============== Similarity helpers ==============
+# ============== Новые функции: метрики и соседство ==============
 
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     return float(util.cos_sim(a, b).item())
@@ -270,6 +280,7 @@ def pair_score(a: np.ndarray, b: np.ndarray, metric: str = "cosine") -> float:
     if m == "dot":
         return dot_product(a, b)
     if m == "euclidean":
+        # для «distance» нормализуем в [0..1] по эвристике
         d = euclidean_dist(a, b)
         return -d
     if m == "manhattan":
@@ -279,7 +290,8 @@ def pair_score(a: np.ndarray, b: np.ndarray, metric: str = "cosine") -> float:
 
 def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors: int = 5):
     """
-    Возвращает (nn_index, distances, indices) похожих соседей; или (None, None, None) если sklearn недоступен.
+    Возвращает индекс sklearn NearestNeighbors (или None, если sklearn недоступен),
+    и список (distances, indices).
     """
     if NearestNeighbors is None:
         return None, None, None
@@ -287,7 +299,9 @@ def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors:
     if m == "cosine":
         nn_metric = "cosine"
     elif m == "dot":
+        # для dot продукта можно имитировать через cosine по нормированным векторам
         nn_metric = "cosine"
+        # нормировка снаружи
         embeddings = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-12)
     elif m == "euclidean":
         nn_metric = "euclidean"
@@ -300,23 +314,31 @@ def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors:
     dists, idxs = nn.kneighbors(embeddings, return_distance=True)
     return nn, dists, idxs
 
-# ============== Ranking metrics ==============
+# ============== Метрики ранжирования ==============
 
-def compute_mrr(ranked: List[int], relevant: Set[int]) -> float:
-    """Mean Reciprocal Rank для одного запроса"""
+def compute_mrr(ranked: List[int], relevant: set) -> float:
+    """
+    Mean Reciprocal Rank для одного запроса.
+    ranked: список индексов в порядке релевантности (самые релевантные первыми).
+    relevant: set индексов релевантных документов.
+    """
     for i, idx in enumerate(ranked, start=1):
         if idx in relevant:
             return 1.0 / i
     return 0.0
 
-def compute_recall_at_k(ranked: List[int], relevant: Set[int], k: int) -> float:
-    """Recall@k для одного запроса"""
+def compute_recall_at_k(ranked: List[int], relevant: set, k: int) -> float:
+    """
+    Recall@k для одного запроса.
+    """
     if not relevant:
         return 0.0
     return len([i for i in ranked[:k] if i in relevant]) / len(relevant)
 
-def compute_ndcg_at_k(ranked: List[int], relevant: Set[int], k: int) -> float:
-    """nDCG@k для бинарной релевантности"""
+def compute_ndcg_at_k(ranked: List[int], relevant: set, k: int) -> float:
+    """
+    nDCG@k (предполагаем бинарную релевантность — 1 если релевантен, 0 иначе).
+    """
     dcg = 0.0
     for i, idx in enumerate(ranked[:k], start=1):
         if idx in relevant:
@@ -324,23 +346,24 @@ def compute_ndcg_at_k(ranked: List[int], relevant: Set[int], k: int) -> float:
     ideal_dcg = sum([1.0 / np.log2(i + 1) for i in range(1, min(len(relevant), k) + 1)])
     return dcg / ideal_dcg if ideal_dcg > 0 else 0.0
 
-def evaluate_ranking_metrics(neighbors: Dict[int, List[int]], relevance: Dict[int, Set[int]], k_values: List[int]) -> pd.DataFrame:
+def evaluate_ranking_metrics(neighbors: Dict[int, List[int]], relevance: Dict[int, set], k_values: List[int]) -> pd.DataFrame:
     """
-    Вычисляет метрики ранжирования для множества запросов.
-    neighbors: {qid -> [candidate_idx,...]}
-    relevance: {qid -> set(candidate_idx,...)}
+    Вычисляет метрики ранжирования для набора запросов.
+    neighbors: {query_id -> [индексы соседей в порядке ранжирования]}
+    relevance: {query_id -> set(индексы релевантных доков)}
+    k_values: список k для Recall@k/nDCG@k
     """
     rows = []
     for qid, ranked in neighbors.items():
         rel = relevance.get(qid, set())
-        row: Dict[str, Any] = {"query_id": qid, "MRR": compute_mrr(ranked, rel)}
+        row = {"query_id": qid, "MRR": compute_mrr(ranked, rel)}
         for k in k_values:
             row[f"Recall@{k}"] = compute_recall_at_k(ranked, rel, k)
             row[f"nDCG@{k}"] = compute_ndcg_at_k(ranked, rel, k)
         rows.append(row)
     return pd.DataFrame(rows)
 
-# ============== Projection / visualization helpers ==============
+# ============== Новые функции: визуализация эмбеддингов ==============
 
 def project_embeddings(embeddings: np.ndarray, method: str = "pca", n_components: int = 2, random_state: int = 42) -> Optional[np.ndarray]:
     if embeddings is None or len(embeddings) == 0:
@@ -359,7 +382,7 @@ def project_embeddings(embeddings: np.ndarray, method: str = "pca", n_components
     else:
         return None
 
-# ============== STS / robustness / pdf ==============
+# ============== Новые функции: бенчмаркинг STS ==============
 
 def _load_builtin_sts_sample(lang: str = "en") -> pd.DataFrame:
     data = [
@@ -418,6 +441,8 @@ def evaluate_sts(model: SentenceTransformer, df: pd.DataFrame, metric: str = "co
     else:
         res["pearson"] = None
     return res
+
+# ============== Новые функции: robustness / bias ==============
 
 def _wordnet_synonyms(word: str) -> List[str]:
     out = set()
@@ -483,6 +508,8 @@ def robustness_probe(model: SentenceTransformer, pairs: List[Tuple[str, str]], m
         rows.append({"phrase_1": base_a, "phrase_2": base_b, "variant": base_a, "score": base_score, "delta": 0.0, "type": "base"})
     return pd.DataFrame(rows)
 
+# ============== Новые функции: автодетектор аномалий/подозрительных ==============
+
 def find_suspicious(df: pd.DataFrame,
                     score_col: str = "score",
                     lexical_col: Optional[str] = "lexical_score",
@@ -499,6 +526,8 @@ def find_suspicious(df: pd.DataFrame,
         out["label_mismatch_positives"] = df[(df[label_col] == 1) & (df[score_col] < low_score_threshold)].copy()
         out["label_mismatch_negatives"] = df[(df[label_col] == 0) & (df[score_col] >= semantic_threshold)].copy()
     return out
+
+# ============== Новые функции: PDF-отчёт ==============
 
 def _save_plot_hist(values: np.ndarray, title: str, path: str):
     plt.figure()
@@ -526,9 +555,11 @@ def export_pdf_report(report_json: Dict[str, Any], charts: Dict[str, str], outpu
     c = pdf_canvas.Canvas(output_path, pagesize=A4)
     w, h = A4
 
+    # Заголовок
     c.setFont("Helvetica-Bold", 16)
     c.drawString(40, h - 50, "Synonym Checker — Report")
 
+    # Сводка (первые 20 ключей)
     c.setFont("Helvetica", 9)
     y = h - 80
     c.drawString(40, y, "Summary:")
@@ -541,6 +572,7 @@ def export_pdf_report(report_json: Dict[str, Any], charts: Dict[str, str], outpu
             c.showPage()
             y = h - 40
 
+    # Картинки
     c.setFont("Helvetica-Bold", 12)
     for name, path in charts.items():
         try:
