@@ -314,6 +314,46 @@ def build_neighbors(embeddings: np.ndarray, metric: str = "cosine", n_neighbors:
     dists, idxs = nn.kneighbors(embeddings, return_distance=True)
     return nn, dists, idxs
 
+# ============== Метрики ранжирования ==============
+
+def compute_mrr(ranked: List[int], relevant: set) -> float:
+    """Mean Reciprocal Rank для одного запроса"""
+    for i, idx in enumerate(ranked, start=1):
+        if idx in relevant:
+            return 1.0 / i
+    return 0.0
+
+def compute_recall_at_k(ranked: List[int], relevant: set, k: int) -> float:
+    """Recall@k для одного запроса"""
+    if not relevant:
+        return 0.0
+    return len([i for i in ranked[:k] if i in relevant]) / len(relevant)
+
+def compute_ndcg_at_k(ranked: List[int], relevant: set, k: int) -> float:
+    """Normalized Discounted Cumulative Gain @k"""
+    dcg = 0.0
+    for i, idx in enumerate(ranked[:k], start=1):
+        if idx in relevant:
+            dcg += 1.0 / np.log2(i + 1)
+    ideal_dcg = sum([1.0 / np.log2(i + 1) for i in range(1, min(len(relevant), k) + 1)])
+    return dcg / ideal_dcg if ideal_dcg > 0 else 0.0
+
+def evaluate_ranking_metrics(neighbors: Dict[int, List[int]], relevance: Dict[int, set], k_values: List[int]) -> pd.DataFrame:
+    """
+    Вычисляет метрики ранжирования для всех запросов.
+    neighbors: {query_id -> [список индексов соседей в порядке ранжирования]}
+    relevance: {query_id -> set индексов релевантных элементов}
+    """
+    rows = []
+    for qid, ranked in neighbors.items():
+        rel = relevance.get(qid, set())
+        row = {"query_id": qid, "MRR": compute_mrr(ranked, rel)}
+        for k in k_values:
+            row[f"Recall@{k}"] = compute_recall_at_k(ranked, rel, k)
+            row[f"nDCG@{k}"] = compute_ndcg_at_k(ranked, rel, k)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
 # ============== Новые функции: визуализация эмбеддингов ==============
 
 def project_embeddings(embeddings: np.ndarray, method: str = "pca", n_components: int = 2, random_state: int = 42) -> Optional[np.ndarray]:
