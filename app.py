@@ -650,7 +650,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
         with tabs[6]:
             st.markdown("#### Ранжирование")
         
-        ds_mode = st.radio("Источник данных", ["Custom dataset2222", "Stub (MS MARCO)"], horizontal=True)
+        ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
 
         if ds_mode == "Custom dataset":
             rank_file = st.file_uploader(
