@@ -842,7 +842,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
         # Итоги и таблицы (твоя логика сохранена)
     with st.expander("📊 3. Результаты и выгрузка", expanded=False):
         if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty:
-        df = st.session_state.df  # достаём датафрейм
+            df = st.session_state.df  # достаём датафрейм
 
         result_csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(
