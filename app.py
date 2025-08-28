@@ -647,8 +647,8 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 else:
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
 
-        # = Ранжирование =
-with tabs[9]:
+            # = Ранжирование =
+    with tabs[9]:
     st.header("📊 Ранжирование моделей")
 
     ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
@@ -757,6 +757,7 @@ with tabs[9]:
         if metrics_b is not None:
             metrics_b_csv = metrics_b.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Скачать детальные метрики Model B (CSV)", data=metrics_b_csv, file_name="ranking_metrics_B.csv", mime="text/csv")
+
 
         # = Robustness =
         with tabs[6]:
