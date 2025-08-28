@@ -649,7 +649,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
 
         # = Ранжирование =
         with tabs[6]:
-            st.markdown(Ранжирование")
+            st.markdown("Ранжирование")
 
             ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
 
