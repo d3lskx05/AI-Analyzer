@@ -847,7 +847,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
     st.dataframe(styled_df, use_container_width=True)
 
         # Suspicious блок (расширено с учётом label)
-    if enable_detector:
+        if enable_detector:
             susp = find_suspicious(df,
                                    score_col="score",
                                    lexical_col="lexical_score",
