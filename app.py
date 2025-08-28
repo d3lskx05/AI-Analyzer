@@ -647,7 +647,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 else:
                     st.info("Для вычисления метрик ранжирования нужен столбец 'label' с релевантностью (0/1).")
         # = Ранжирование =
-        with tabs[4]:
+        with tabs[6]:
         st.markdown("#### Ранжирование")
         
         ds_mode = st.radio("Источник данных", ["Custom dataset", "Stub (MS MARCO)"], horizontal=True)
@@ -758,7 +758,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                     st.download_button("⬇️ Скачать детальные метрики Model B (CSV)", data=metrics_b_csv, file_name="ranking_metrics_B.csv", mime="text/csv")
                 
         # = Robustness =
-        with tabs[6]:
+        with tabs[7]:
             st.markdown("#### Robustness / устойчивость")
             sample_n = st.slider("Сколько пар проверять", 1, min(20, len(df)), min(5, len(df)))
             pairs = list(zip(df["phrase_1"].tolist()[:sample_n], df["phrase_2"].tolist()[:sample_n]))
@@ -773,7 +773,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.download_button("⬇️ Скачать robustness CSV", data=csv_bytes, file_name="robustness.csv", mime="text/csv")
 
         # = Export =
-        with tabs[7]:
+        with tabs[8]:
             st.markdown("#### Экспорт отчёта (JSON/PDF)")
             report = {
                 "file_name": uploaded_file.name,
@@ -815,7 +815,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                     st.info("PDF отчёт недоступен (нет reportlab). Установите зависимость, чтобы включить экспорт.")
 
         # = Reproducibility =
-        with tabs[8]:
+        with tabs[9]:
             st.markdown("#### Сохранение/сравнение экспериментов")
             if st.button("Сохранить текущий запуск как эксперимент"):
                 exp = {
