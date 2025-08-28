@@ -840,14 +840,14 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.info("Экспериментов пока нет.")
 
         # Итоги и таблицы (твоя логика сохранена)
-    with st.expander("📊 3. Результаты и выгрузка", expanded=False):
+        st.subheader("3. Результаты и выгрузка")
         result_csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("⬇️ Скачать результаты CSV", data=result_csv, file_name="results.csv", mime="text/csv")
         styled_df = style_suspicious_and_low(df, semantic_threshold, lexical_threshold, low_score_threshold)
         st.dataframe(styled_df, use_container_width=True)
 
         # Suspicious блок (расширено с учётом label)
-    if enable_detector:
+        if enable_detector:
             susp = find_suspicious(df,
                                    score_col="score",
                                    lexical_col="lexical_score",
