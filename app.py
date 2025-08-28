@@ -840,6 +840,7 @@ if mode == "Файл (CSV/XLSX/JSON)":
                 st.info("Экспериментов пока нет.")
 
         # Итоги и таблицы (твоя логика сохранена)
+if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty:
     with st.expander("📊 3. Результаты и выгрузка", expanded=False):
         result_csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("⬇️ Скачать результаты CSV", data=result_csv, file_name="results.csv", mime="text/csv")
