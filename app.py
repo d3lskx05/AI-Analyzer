@@ -860,19 +860,27 @@ with st.expander("📊 3. Результаты и выгрузка", expanded=Fa
     else:
         st.info("Нет данных для отображения или выгрузки")
 
-        # Suspicious блок (расширено с учётом label)
-    if enable_detector:
-            susp = find_suspicious(df,
-                                   score_col="score",
-                                   lexical_col="lexical_score",
-                                   label_col=("label" if "label" in df.columns else None),
-                                   semantic_threshold=semantic_threshold,
-                                   lexical_threshold=lexical_threshold,
-                                   low_score_threshold=low_score_threshold)
-            st.markdown("### Подозрительные / аномальные случаи")
-            for k, sdf in susp.items():
-                st.markdown(f"**{k}** — {len(sdf)}")
-                if not sdf.empty:
-                    st.dataframe(sdf, use_container_width=True)
-                    s_csv = sdf.to_csv(index=False).encode("utf-8")
-                    st.download_button(f"⬇️ Скачать {k}.csv", data=s_csv, file_name=f"{k}.csv", mime="text/csv")
+    # Suspicious блок (расширено с учётом label)
+    if "df" in st.session_state and st.session_state.df is not None and not st.session_state.df.empty and enable_detector:
+        df = st.session_state.df
+        susp = find_suspicious(
+            df,
+            score_col="score",
+            lexical_col="lexical_score",
+            label_col=("label" if "label" in df.columns else None),
+            semantic_threshold=semantic_threshold,
+            lexical_threshold=lexical_threshold,
+            low_score_threshold=low_score_threshold
+        )
+        st.markdown("### Подозрительные / аномальные случаи")
+        for k, sdf in susp.items():
+            st.markdown(f"**{k}** — {len(sdf)}")
+            if not sdf.empty:
+                st.dataframe(sdf, use_container_width=True)
+                s_csv = sdf.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    f"⬇️ Скачать {k}.csv",
+                    data=s_csv,
+                    file_name=f"{k}.csv",
+                    mime="text/csv"
+                )
